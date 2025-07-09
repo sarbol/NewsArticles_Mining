@@ -47,21 +47,19 @@ The current implementation focuses on **unsupervised clustering** of news articl
 ## 🛠️ INSTALLATION
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.11.13
 - CUDA-compatible GPU (optional, for faster processing)
-- Google Colab account (for current implementation)
+- Anaconda / Miniconda
 
 ### Required Dependencies
-
-```bash
-pip install datasets sentence-transformers umap-learn hdbscan keybert
-pip install plotly pandas numpy scikit-learn matplotlib wordcloud pillow
-pip install spacy requests tqdm
-python -m spacy download en_core_web_md
-```
+### Conda Environment  
+`conda create -n newsAnalysis python==3.11.13`  
+`conda activate newsAnalysis`  
+`python -m pip install --upgrade pip setuptools wheel`  
+`python -m pip install -r requirements.txt`
 
 ### Dataset Setup
-The current implementation uses the BBC News dataset. Ensure your data is structured as:
+The current implementation uses the [BBC News raw dataset](http://mlg.ucd.ie/datasets/bbc.html). Ensure your data is structured as:
 
 ```
 bbc/
@@ -78,44 +76,11 @@ bbc/
 ## 🚀 USAGE
 
 ### Quick Start
+To start classifying news articles, you can copy and paste articles from any source into the `news.txt` file. Execute the command below in your terminal.
 
-```python
-from sentence_transformers import SentenceTransformer
-import numpy as np
+`python main.py`
 
-# Initialize the embedding model
-embedder = SentenceTransformer("all-mpnet-base-v2")
 
-# Get embeddings and perform clustering
-reduced_embeddings, raw_text = get_category_embeddings(
-    model=embedder, 
-    category="entertainment", 
-    n_dim=3, 
-    batch_size=16
-)
-
-# Analyze optimal cluster count
-cluster_analysis(reduced_embeddings, range(3, 30))
-
-# Perform clustering
-from sklearn.cluster import KMeans
-clusterer = KMeans(n_clusters=3)
-labels = clusterer.fit_predict(reduced_embeddings)
-
-# Visualize results
-visualize_cluster_2D(reduced_embeddings, labels, "Entertainment Articles Clustering")
-```
-
-### Advanced Analysis
-
-```python
-# Entity-based cluster analysis
-ce = ClustersEntities(raw_text, labels)
-ce.visualize_cluster(entity_labels=["PERSON", "ORG", "EVENT"])
-
-# Silhouette analysis for cluster quality
-silhouette_analysis(reduced_embeddings, labels, "KMeans")
-```
 
 ## 📊 RESULTS & EVALUATION
 
@@ -140,7 +105,6 @@ The current implementation on BBC Sport articles shows:
 |--------|-------|-------------|
 | **Silhouette Score** | 0.80 | Average cluster cohesion |
 | **Number of Clusters** | 5 | Optimal cluster count |
-| **Coverage** | 95% | Articles successfully clustered |
 
 ### Entity Analysis
 
@@ -182,21 +146,14 @@ graph TD
 news-clustering/
 ├── README.md
 ├── requirements.txt
-├── main.py                 # Main clustering pipeline
-├── src/
-│   ├── embeddings.py      # Text embedding utilities
-│   ├── clustering.py      # Clustering algorithms
-│   ├── visualization.py   # Plotting functions
-│   └── entities.py        # Entity extraction
-├── data/
-│   └── bbc/              # BBC News dataset
-├── models/
-│   └── saved_models/     # Trained models and reducers
+├── main.py
+├── schemas.py
+├── utility.py                
 ├── output/
-│   ├── embeddings/       # Cached embeddings
-│   └── results/          # Analysis results
+│   ├── artefacts/
+│   └── data/
 └── assets/
-    └── images/           # Visualization outputs
+    └── images/
 ```
 
 ## ⚙️ CONFIGURATION
@@ -292,6 +249,7 @@ For questions, suggestions, or collaboration opportunities:
 - **GitHub**: https://github.com/sarbol/
 - **Email**: sarboldipo80@gmail.com
 - **LinkedIn**: https://www.linkedin.com/in/saburi-yusuf/
+
 ---
 
 *This project is actively maintained and updated. Star ⭐ the repository if you find it useful!*
