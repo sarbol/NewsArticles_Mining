@@ -292,7 +292,6 @@ For questions, suggestions, or collaboration opportunities:
 - **GitHub**: https://github.com/sarbol/
 - **Email**: sarboldipo80@gmail.com
 - **LinkedIn**: https://www.linkedin.com/in/saburi-yusuf/
-
 ---
 
 *This project is actively maintained and updated. Star ⭐ the repository if you find it useful!*
