@@ -1,3 +1,6 @@
+bcrypt==4.3.0
+cryptography==45.0.5
+fastapi==0.116.1
 hdbscan==0.8.40
 matplotlib==3.10.3
 numba==0.60.0
@@ -5,10 +8,12 @@ numpy==2.0.2
 pandas==2.2.2
 plotly==6.2.0
 python-dotenv==1.1.1
+python-jose==3.5.0
 requests==2.32.4
 scikit-learn==1.6.1
 sentence-transformers==4.1.0
 spacy==3.8.7
 torch==2.7.1
 umap-learn==0.5.9.post2
+uvicorn==0.35.0
 wordcloud==1.9.4
