@@ -13,9 +13,12 @@ import uvicorn
 import utility
 from fastapi import FastAPI, HTTPException, status, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles  # Add this import
+from fastapi.responses import FileResponse  # Add this import
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
+from pathlib import Path  # Add this import
 import models
 import database
 import crud
@@ -36,7 +39,12 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "*"
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",  # Vite dev server
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",  # Same origin
+        "http://127.0.0.1:8000",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -129,8 +137,8 @@ def vote_article(vote: schemas.VoteCreate, db: Session = Depends(get_db), curren
     return crud.make_vote(db, current_user.id, vote)
 
 @app.get("/api/users/")
-def read_users(db: Session = Depends(get_db)):
-    return db.query(models.User).all()
+def read_users(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    return [current_user]
 
 
 @app.get("/api/articles/paginated", response_model = schemas.PaginatedArticles)
@@ -138,6 +146,34 @@ def read_articles_paginated(main_category: str, limit: int = Query(10, ge=1, le=
                             offset: int = Query(0, ge=0), db: Session = Depends(get_db)):
      
     return crud.get_articles_by_category(db, main_category, limit, offset)
+
+
+# Static file serving for frontend
+static_dir = Path("static")
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+    
+    # Serve React app for all non-API routes
+    @app.get("/{full_path:path}")
+    async def serve_react_app(full_path: str):
+        """
+        Serve the React app for all routes that don't start with /api
+        This enables React Router to work properly
+        """
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        
+        # Try to serve the requested file
+        file_path = static_dir / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        
+        # For all other routes, serve the React index.html (SPA routing)
+        index_file = static_dir / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+        
+        raise HTTPException(status_code=404, detail="File not found")
 
 
 if __name__ == "__main__":

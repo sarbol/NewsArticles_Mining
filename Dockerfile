@@ -1,48 +1,61 @@
-FROM python:3.11.13-slim-bullseye AS builder
+# Stage 1: Frontend build - using smaller Alpine base
+FROM node:20-alpine AS frontend-builder
 
-# Set workdir
+WORKDIR /usr/src/frontend
+
+# Install dependencies first for better caching
+COPY frontend-app/package.json frontend-app/package-lock.json ./
+RUN npm ci
+
+# Copy and build frontend
+COPY frontend-app/ ./
+RUN npm run build && \
+    rm -rf node_modules && \
+    find /usr/src/frontend/dist -name "*.map" -delete
+
+# Stage 2: Python builder - slimmed down
+FROM python:3.11.13-slim-bullseye AS python-builder
+
 WORKDIR /usr/src/app
 
-# Install system dependencies for building wheels
-RUN apt-get update && apt-get install -y \
+# Install only essential build dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
-    g++ \
     python3-dev \
-    libatlas-base-dev \
-    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-
-# Copy requirements first for layer caching
-COPY ./requirements.txt .
-
-# Upgrade pip and install Python dependencies
-RUN python -m venv /opt/venv && \
-    /opt/venv/bin/python -m pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
-
-# Copy app code
-COPY . .
-
-
-
-# Stage 2: Final runtime image
-FROM python:3.11.13-slim-bullseye
-
-
-# Set workdir
-WORKDIR /usr/src/app
-
-# Copy virtual environment from builder stage
-COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /usr/src/app /usr/src/app/
-
-# Activate virtual environment
+# Create virtual environment
+RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Expose port
-EXPOSE 8000
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Run app
+# Copy backend code
+COPY . .
+
+# Stage 3: Final image - ultra slim
+FROM python:3.11.13-slim-bullseye
+
+WORKDIR /usr/src/app
+
+# Copy only necessary files from builders
+COPY --from=python-builder /opt/venv /opt/venv
+COPY --from=frontend-builder /usr/src/frontend/dist ./static
+COPY --from=python-builder /usr/src/app .
+
+# Clean up Python cache and docs
+RUN find /usr/local -type d -name '__pycache__' -exec rm -rf {} + && \
+    find /opt/venv -type d -name '__pycache__' -exec rm -rf {} + && \
+    rm -rf /usr/share/man /usr/share/doc
+
+# Set environment
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+EXPOSE 8000
 CMD ["python", "main.py"]

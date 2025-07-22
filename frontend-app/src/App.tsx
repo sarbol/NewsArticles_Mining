@@ -44,7 +44,7 @@ interface ArticlesResponse {
 }
 
 // API Base URL - adjust as needed
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = '/api';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -64,8 +64,6 @@ const App: React.FC = () => {
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [registerForm, setRegisterForm] = useState({ name: '', email: '', password: '' });
   const [articleForm, setArticleForm] = useState({ title: '', content: '' });
-
-  const carouselRef = useRef<HTMLDivElement>(null);
 
   const categories = ['tech', 'sport', 'politics', 'entertainment', 'business'];
 
