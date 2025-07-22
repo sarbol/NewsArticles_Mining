@@ -58,6 +58,12 @@ The current implementation focuses on **unsupervised clustering** of news articl
 `python -m pip install --upgrade pip setuptools wheel`  
 `python -m pip install -r requirements.txt`
 
+### Docker Run
+`docker build --no-cache -t newsapp .`
+`docker run --name newsapp -e HF_TOKEN=<TOKEN> -e AUTH_SECRET_KEY=<SECRET_KEY> -d -p 8000:8000 newsapp:latest`
+
+> Navigate to  `http://localhost:8000/`
+
 ### Dataset Setup
 The current implementation uses the [BBC News raw dataset](http://mlg.ucd.ie/datasets/bbc.html). Ensure your data is structured as:
 
