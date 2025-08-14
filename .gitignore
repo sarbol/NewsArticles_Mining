@@ -213,3 +213,6 @@ __marimo__/
 # Marimo cache
 clean_notebook.py
 change-commit-date.sh
+
+# helper scripts
+populate.py
