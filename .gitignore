@@ -216,3 +216,4 @@ change-commit-date.sh
 
 # helper scripts
 populate.py
+test.py

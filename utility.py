@@ -59,32 +59,63 @@ def read_txt_file(file_path: str) -> str:
       return f.read()
     
 
-def context(article: str):
-  return f"""
+def context(article: str, task: str) -> str:
+  if task == "entity":
+     return f"""
+                  Read and Comprehend the news article below.
+                  <article>{article}</article>
+                  
+                  Perform the following tasks:
+                  
+                  1 - Extract names of people mentioned in the article.
+                  2 - Determine the Job/Profession of the people mentioned in the article e.g Footballer, celebrity, politician, actor, musician, business man
+                      politician etc
+                  
+                  >> Note: It is possible that the profession of some individuals might not be explicitly stated but quite possible to infer base on context and how they are described.
+                  
+                  3 - Extract the context describing the profession/job of the individuals as written in the article. Do not summarize or add any comment, just extract
+                      the most important section of the article that states or describes the profession. Keep it as concise as possible.
+                      Do not summarize or add comments, it is important this context is searchable for downstream analysis.
+                      This means for each person you create an object with 4 fields (name: str, job: str, context: str, explicit: boolean). Return a list of these objects in JSON format
+                      
+                """
+  else:
+     return f""" Read and Comprehend the news article below
+                <article>{article}</article>
+                 Your main task is to extract events that are scheduled to happen or have already concluded.
+                 Return a JSON object using this schema
 
-  Read and Comprehend the news article below.
 
-  <article>{article}</article>
+                 {
+                    {
+                       "type": "array",
+                       "items": {
+                          "type": "object",
+                          "properties": {
+                             "eventContext": {
+                                "type": "string",
+                                "description": "Statement describing the event"
+                             },
+                             "eventDate": {
+                                "type": "string",
+                                "description": "Specified date of the event. As stated in the article"
+                             },
+                             "eventType": {
+                                "type": "string",
+                                "enum": ["upcoming", "concluded"],
+                                "description": "If the event is in the future or concluded"
+                             }
+                          },
+                          "required": [
+                             "eventContext", "eventDate", "eventType"
+                          ]
+                       }
+                    }
+                 }
+             """
 
-  Perform the following tasks:
 
-  1 - Extract names of people mentioned in the article.
-
-  2 - Determine the Job/Profession of the people mentioned in the article e.g Footballer, celebrity, politician, actor, musician, business man
-      politician etc
-
-    >> Note: It is possible that the profession of some individuals might not be explicitly stated but quite possible to infer base on context and how they are described.
-
-  3 - Extract the context describing the profession/job of the individuals as written in the article. Do not summarize or add any comment, just extract
-      the most important section of the article that states or describes the profession. Keep it as concise as possible.
-      Do not summarize or add comments, it is important this context is searchable for downstream analysis.
-
-  This means for each person you create an object with 4 fields (name: str, job: str, context: str, explicit: boolean). Return a list of these objects in JSON format
-
-"""
-
-
-def openrouter_request(article: str):
+def openrouter_request(article: str, task: str):
     response = requests.post(
         url = "https://openrouter.ai/api/v1/chat/completions",
         headers = {
@@ -97,7 +128,7 @@ def openrouter_request(article: str):
                 "messages": [
                     {
                         "role": "user",
-                        "content": context(article)
+                        "content": context(article, task)
                     }
                 ],
                 "provider": {
@@ -114,3 +145,108 @@ def openrouter_request(article: str):
         raise Exception(f"Error: {response.status_code} - {response.text}")
     
     return response.json()
+
+
+def extract_entity(text: str):
+    store = []
+    for line in text.split("\n"):
+        if ":" in line:
+            store.append(line.strip())
+    
+    extraction = []
+    d = dict()
+    count = 0
+    while count < len(store):
+        for line in store:
+            pos = line.find(":")
+            if "name" in line[:pos].lower():
+                if not d:
+                    d["name"] = line[pos + 1:].strip().strip('"').strip(',').strip('"')
+                else:
+                    extraction.append(d)
+                    d = dict()
+                    d["name"] = line[pos + 1:].strip().strip('"').strip(',').strip('"')
+            elif "job" in line[:pos].lower():
+                value = line[pos+1:].strip()
+                d["job"] = value.strip('"').strip(',').strip('"')
+            elif "context" in line[:pos].lower():
+                value = line[pos+1:].strip()
+                d["context"] = value.strip('"').strip('"').strip(',').strip('"')
+            elif "explicit" in line[:pos].lower():
+                value = line[pos+1:].strip()
+                d["explicit"] = value.strip('"').strip('"').strip(',').strip('"')
+            count += 1
+    extraction.append(d)
+    return extraction
+
+
+def extract_event(text: str):
+    store = []
+    for line in text.split("\n"):
+        if ":" in line:
+            store.append(line.strip())
+    
+    extraction = []
+    d = dict()
+    count = 0
+    while count < len(store):
+        for line in store:
+            pos = line.find(":")
+            if "eventcontext" in line[:pos].lower():
+                if not d:
+                    d["eventContext"] = line[pos + 1:].strip().strip('"').strip(',').strip('"')
+                else:
+                    extraction.append(d)
+                    d = dict()
+                    d["eventContext"] = line[pos + 1:].strip().strip('"').strip(',').strip('"')
+            elif "eventdate" in line[:pos].lower():
+                value = line[pos+1:].strip()
+                d["eventDate"] = value.strip('"').strip(',').strip('"')
+            elif "eventtype" in line[:pos].lower():
+                value = line[pos+1:].strip()
+                d["eventType"] = value.strip('"').strip('"').strip(',').strip('"')
+            count += 1
+    extraction.append(d)
+    return extraction
+
+
+def api_openai(article: str, task: str) -> dict:
+    response = requests.post(
+        url="https://api.openai.com/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {os.environ.get('OPENAI_KEY')}",
+            "Content-Type": "application/json"
+        },
+        json = {
+            "model": "gpt-4.1",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": context(article, task)
+                }
+            ],
+            "max_tokens": 1024
+        }
+    )
+    if response.status_code == 200:
+        return response.json()
+    return None
+
+
+def llm_wrapper(article: str, task: str = "entity") -> list:
+  try:
+     response = openrouter_request(article, task)
+     if task == "entity":
+        return extract_entity(response["choices"][0]["message"]["content"])
+     else:
+        return extract_event(response["choices"][0]["message"]["content"])
+  except Exception:
+    response = api_openai(article, task)
+    if response:
+      if task == "entity":
+         return extract_entity(response["choices"][0]["message"]["content"])
+      else:
+         return extract_event(response["choices"][0]["message"]["content"])
+    return None
+     
+    

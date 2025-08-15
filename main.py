@@ -96,6 +96,39 @@ def predict_category(article: schemas.Article):
         "sub": None
     }
 
+@app.post("/api/event", status_code = status.HTTP_200_OK, response_model=schemas.Event)
+def extract_event(article: schemas.Article):
+    if article.title:
+        content = article.title + "\n" + article.content
+    else:
+        content = article.content
+    
+    response = utility.llm_wrapper(content, task = "event")
+    if response:
+        return {
+            "items": response
+        }
+    return {
+        "items": []
+    }
+
+
+@app.post("/api/entity", status_code = status.HTTP_200_OK, response_model=schemas.Entity)
+def extract_event(article: schemas.Article):
+    if article.title:
+        content = article.title + "\n" + article.content
+    else:
+        content = article.content
+    
+    response = utility.llm_wrapper(content, task = "entity")
+    if response:
+        return {
+            "items": response
+        }
+    return {
+        "items": []
+    }
+
 
 @app.post("/api/register", response_model=schemas.Token)
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):

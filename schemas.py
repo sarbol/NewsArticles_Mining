@@ -21,6 +21,29 @@ class Category:
     main: Optional[str] = None
     sub: Optional[str] = None
 
+
+@dataclass
+class eventObject:
+    eventContext: Optional[str] = None
+    eventDate: Optional[str] = None
+    eventType: Optional[str] = None
+
+@dataclass
+class Event:
+    items: List[eventObject]
+
+
+@dataclass
+class entityObject:
+    name: str
+    job: str
+    context: str
+    explicit: bool
+
+@dataclass
+class Entity:
+    items: List[entityObject]
+
 @dataclass
 class UserCreate:
     name: str
