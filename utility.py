@@ -6,6 +6,9 @@ import os
 from dotenv import load_dotenv
 import requests
 import json
+import re
+from difflib import SequenceMatcher
+from typing import List, Tuple, Optional
 
 load_dotenv()
 
@@ -247,6 +250,138 @@ def llm_wrapper(article: str, task: str = "entity") -> list:
          return extract_entity(response["choices"][0]["message"]["content"])
       else:
          return extract_event(response["choices"][0]["message"]["content"])
+    return None
+  
+
+def levenshtein_distance(s1: str, s2: str) -> float:
+    """Calculate normalized Levenshtein distance between two strings."""
+    if len(s1) == 0 or len(s2) == 0:
+        return 1.0
+
+    # Use SequenceMatcher for efficiency
+    matcher = SequenceMatcher(None, s1.lower(), s2.lower())
+    return 1.0 - matcher.ratio()
+
+def tokenize_text(text: str) -> List[Tuple[str, int, int]]:
+    """Tokenize text and return (word, start_pos, end_pos) tuples."""
+    tokens = []
+    for match in re.finditer(r'\b\w+\b', text.lower()):
+        tokens.append((match.group(), match.start(), match.end()))
+    return tokens
+
+def find_fuzzy_sequence(query_tokens: List[str], text_tokens: List[Tuple[str, int, int]],
+                       typo_threshold: float = 0.8) -> Optional[Tuple[int, int]]:
+    """Find a fuzzy sequence allowing for gaps and typos."""
+    if not query_tokens or not text_tokens:
+        return None
+
+    best_match = None
+    best_score = float('inf')
+
+    # Try starting from each position in the text
+    for start_idx in range(len(text_tokens)):
+        current_score = 0
+        matched_positions = []
+        query_idx = 0
+        text_idx = start_idx
+
+        while query_idx < len(query_tokens) and text_idx < len(text_tokens):
+            query_word = query_tokens[query_idx]
+            text_word = text_tokens[text_idx][0]
+
+            # Calculate similarity
+            distance = levenshtein_distance(query_word, text_word)
+            similarity = 1.0 - distance
+
+            if similarity >= typo_threshold:
+                # Good match found
+                matched_positions.append(text_idx)
+                current_score += distance
+                query_idx += 1
+                text_idx += 1
+            else:
+                # No match, advance text position to allow for intervening words
+                text_idx += 1
+
+                # If we've gone too far without finding matches, break
+                if text_idx - start_idx > len(query_tokens) * 3:
+                    break
+
+        # Check if we matched all query words
+        if query_idx == len(query_tokens):
+            avg_score = current_score / len(query_tokens)
+            if avg_score < best_score:
+                best_score = avg_score
+                start_pos = text_tokens[matched_positions[0]][1]
+                end_pos = text_tokens[matched_positions[-1]][2]
+                best_match = (start_pos, end_pos)
+
+    return best_match
+
+def split_query_into_chunks(query: str) -> List[str]:
+    """Split query into meaningful chunks, handling ellipsis and natural breaks."""
+    # First, split by ellipsis or multiple dots
+    chunks = re.split(r'\.{3,}', query)
+
+    if len(chunks) > 1:
+        # If we have ellipsis, treat as separate chunks
+        return [chunk.strip() for chunk in chunks if chunk.strip()]
+
+    # For continuous queries, we'll treat the whole thing as one chunk
+    # but the fuzzy matching will handle gaps
+    return [query.strip()]
+
+def find_query_in_article(query: str, article: str, typo_threshold: float = 0.8) -> Optional[Tuple[int, int]]:
+    """
+    Find the location of a query in an article with smart fuzzy matching.
+
+    Args:
+        query: The text to search for
+        article: The article text to search in
+        typo_threshold: Similarity threshold for typo tolerance (0.0-1.0)
+
+    Returns:
+        Tuple of (start, end) character positions if found, None otherwise
+    """
+    if not query or not article:
+        return None
+
+    # Handle case insensitivity by working with lowercase versions
+    query_lower = query.lower()
+    article_lower = article.lower()
+
+    # First try exact substring match (fastest)
+    if query_lower in article_lower:
+        start = article_lower.find(query_lower)
+        return (start, start + len(query))
+
+    # Split query into chunks
+    query_chunks = split_query_into_chunks(query)
+
+    if len(query_chunks) == 1:
+        # Single chunk - use fuzzy sequence matching
+        query_tokens = re.findall(r'\b\w+\b', query_chunks[0].lower())
+        text_tokens = tokenize_text(article)
+        return find_fuzzy_sequence(query_tokens, text_tokens, typo_threshold)
+
+    else:
+        # Multiple chunks - find each chunk and return span from first to last
+        chunk_positions = []
+
+        for chunk in query_chunks:
+            chunk_tokens = re.findall(r'\b\w+\b', chunk.lower())
+            text_tokens = tokenize_text(article)
+            chunk_pos = find_fuzzy_sequence(chunk_tokens, text_tokens, typo_threshold)
+
+            if chunk_pos:
+                chunk_positions.append(chunk_pos)
+            else:
+                return None  # If any chunk is not found, return None
+
+        if chunk_positions:
+            # Return span from start of first chunk to end of last chunk
+            return (chunk_positions[0][0], chunk_positions[-1][1])
+
     return None
      
     

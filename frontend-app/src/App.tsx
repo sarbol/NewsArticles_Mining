@@ -27,9 +27,26 @@ interface AuthToken {
   token_type: string;
 }
 
+interface Event {
+  eventContext: string;
+  eventDate: string;
+  eventType: string
+}
+
+interface Entity {
+  name: string;
+  job: string;
+  context: string;
+  explicit: string;
+  name_position: number[];
+  context_position: number[]
+}
+
 interface CategoryPrediction {
   main: string | null;
   sub: string | null;
+  entities: Entity[];
+  events: Event[]
 }
 
 interface Toast {
@@ -253,7 +270,7 @@ const App: React.FC = () => {
         })
       });
 
-      let categories: CategoryPrediction = { main: null, sub: null };
+      let categories: CategoryPrediction = { main: null, sub: null,  entities: [], events: []};
       if (categoryResponse.ok) {
         categories = await categoryResponse.json();
       }
@@ -271,7 +288,9 @@ const App: React.FC = () => {
           title: articleForm.title,
           content: articleForm.content,
           main_category: categories.main,
-          sub_category: categories.sub
+          sub_category: categories.sub,
+          entities: categories.entities,
+          events: categories.events
         })
       });
 

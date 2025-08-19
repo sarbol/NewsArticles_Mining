@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 import models
 import auth
 from fastapi import HTTPException
+import json
 
 def get_user_by_email(db: Session, email: str):
     return db.query(models.User).filter(models.User.email == email).first()
@@ -20,7 +21,11 @@ def create_user(db: Session, user_data):
     return user
 
 def create_article(db: Session, publisher_id: int, image_id: int, article_data):
-    article = models.Article(publisher_id=publisher_id, image_id = image_id, **article_data.__dict__)
+    article = models.Article(publisher_id=publisher_id, image_id = image_id,
+                             title = article_data.title, content = article_data.content,
+                             main_category = article_data.main_category,
+                             sub_category = article_data.sub_category,
+                             entities = [e.__dict__ for e in article_data.entities], events = [e.__dict__ for e in article_data.events])
     db.add(article)
     db.commit()
     db.refresh(article)

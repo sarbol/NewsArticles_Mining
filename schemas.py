@@ -10,27 +10,10 @@ class Article:
 
 
 @dataclass
-class ArticleCreate:
-    content: str
-    title: Optional[str] = None
-    main_category: Optional[str] = None
-    sub_category: Optional[str] = None
-
-@dataclass
-class Category:
-    main: Optional[str] = None
-    sub: Optional[str] = None
-
-
-@dataclass
 class eventObject:
     eventContext: Optional[str] = None
     eventDate: Optional[str] = None
     eventType: Optional[str] = None
-
-@dataclass
-class Event:
-    items: List[eventObject]
 
 
 @dataclass
@@ -39,10 +22,24 @@ class entityObject:
     job: str
     context: str
     explicit: bool
+    name_position: List[int]
+    context_position: List[int]
 
 @dataclass
-class Entity:
-    items: List[entityObject]
+class Category:
+    entities: List[entityObject]
+    events: List[eventObject]
+    main: Optional[str] = None
+    sub: Optional[str] = None
+
+@dataclass
+class ArticleCreate:
+    content: str
+    entities: List[entityObject]
+    events: List[eventObject]
+    title: Optional[str] = None
+    main_category: Optional[str] = None
+    sub_category: Optional[str] = None
 
 @dataclass
 class UserCreate:

@@ -12,6 +12,7 @@ import schemas
 import uvicorn
 import utility
 from fastapi import FastAPI, HTTPException, status, Depends, Query
+from fastapi.exceptions import ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles  # Add this import
 from fastapi.responses import FileResponse  # Add this import
@@ -76,58 +77,68 @@ async def root():
     return {"message": "Welcome to the News Category Prediction API"}
 
 
-@app.post("/api/category", status_code = status.HTTP_200_OK, response_model=schemas.Category)
+@app.post("/api/category", status_code=status.HTTP_200_OK, response_model=schemas.Category)
 def predict_category(article: schemas.Article):
-    if article.title:
-        content = article.title + "\n" + article.content
-    else:
-        content = article.content
-    
-    response = utility.news_classification(content, embedding_model, inference_obj)
-    
-    if response:
-        return {
-            "main": response.get("category"),
-            "sub": response.get("sub_category")
-        }
-    
-    return {
-        "main": None,
-        "sub": None
-    }
+    try:
+        if article.title:
+            content = article.title + "\n" + article.content
+        else:
+            content = article.content
+        
+        print(f"Content:\n {content}")
 
-@app.post("/api/event", status_code = status.HTTP_200_OK, response_model=schemas.Event)
-def extract_event(article: schemas.Article):
-    if article.title:
-        content = article.title + "\n" + article.content
-    else:
-        content = article.content
-    
-    response = utility.llm_wrapper(content, task = "event")
-    if response:
-        return {
-            "items": response
-        }
-    return {
-        "items": []
-    }
+        response = utility.news_classification(content, embedding_model, inference_obj)
+        events = utility.llm_wrapper(content, task="event")
+        entities = utility.llm_wrapper(content, task="entity")
 
+        for entity in entities:
+            name_position = utility.find_query_in_article(entity.get("name"), content)
+            context_position = utility.find_query_in_article(entity.get("context"), content)
+            if not entity.get("name"):
+                entity["name"] = ""
+            if not entity.get("job"):
+                entity["job"] = ""
+            if not entity.get("context"):
+                entity["context"] = ""
+            if not entity.get("explicit"):
+                entity["explicit"] = "false"
+            entity["name_position"] = name_position or []
+            entity["context_position"] = context_position or []
+        
+        for event in events:
+            if not event.get("eventContext"):
+                event["eventContext"] = ""
+            if not event.get("eventDate"):
+                event["eventDate"] = ""
+            if not event.get("eventType"):
+                event["eventType"] = ""
 
-@app.post("/api/entity", status_code = status.HTTP_200_OK, response_model=schemas.Entity)
-def extract_event(article: schemas.Article):
-    if article.title:
-        content = article.title + "\n" + article.content
-    else:
-        content = article.content
-    
-    response = utility.llm_wrapper(content, task = "entity")
-    if response:
-        return {
-            "items": response
-        }
-    return {
-        "items": []
-    }
+        if response:
+            return {
+                "main": response.get("category"),
+                "sub": response.get("sub_category"),
+                "entities": entities,
+                "events": events
+            }
+        
+        return {"main": None, "sub": None, "entities": [], "events": []}
+
+    except ResponseValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": e.errors(),
+                "payload": article.dict()
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": str(e),
+                "payload": article.dict()
+            }
+        )
 
 
 @app.post("/api/register", response_model=schemas.Token)
