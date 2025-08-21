@@ -115,13 +115,13 @@ def predict_category(article: schemas.Article):
 
         if response:
             return {
-                "main": response.get("category"),
-                "sub": response.get("sub_category"),
+                "main_category": response.get("category"),
+                "sub_category": response.get("sub_category"),
                 "entities": entities,
                 "events": events
             }
         
-        return {"main": None, "sub": None, "entities": [], "events": []}
+        return {"main_category": None, "sub_category": None, "entities": [], "events": []}
 
     except ResponseValidationError as e:
         raise HTTPException(

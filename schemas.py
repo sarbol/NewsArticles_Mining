@@ -29,8 +29,8 @@ class entityObject:
 class Category:
     entities: List[entityObject]
     events: List[eventObject]
-    main: Optional[str] = None
-    sub: Optional[str] = None
+    main_category: Optional[str] = None
+    sub_category: Optional[str] = None
 
 @dataclass
 class ArticleCreate:
@@ -76,6 +76,8 @@ class ArticleResponse:
     downvotes: int
     main_category: Optional[str] = None
     sub_category: Optional[str] = None
+    entities: List[entityObject]
+    events: List[eventObject]
 
 
 @dataclass

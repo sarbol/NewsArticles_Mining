@@ -54,11 +54,12 @@ def get_articles_by_category(db: Session, main_category: str, limit: int, offset
             "sub_category": article.sub_category,
             "published_at": article.published_at,
             "upvotes": article.upvotes,
-            "downvotes": article.downvotes
-
+            "downvotes": article.downvotes,
+            "entities": article.entities,
+            "events": article.events
         }
         retrieved_articles.append(data)
-    return {"count": total, "articles": retrieved_articles}
+    return {"total": total, "articles": retrieved_articles}
 
 
 def make_vote(db: Session, user_id: int, vote_data):

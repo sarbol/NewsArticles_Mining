@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, User, LogOut, Plus, Clock, Tag, HelpCircle, 
 
 // Types matching your backend schema
 interface Article {
-  id: number; // Required since backend now provides it
+  id: number;
   title: string;
   content: string;
   main_category: string;
@@ -11,9 +11,10 @@ interface Article {
   published_at: string;
   upvotes: number;
   downvotes: number;
-  // These come from your backend response
   publisher: string;
   image: string;
+  user_vote?: 'up' | 'down' | 'neutral';
+  voted_users?: number[];
 }
 
 interface User {
@@ -27,26 +28,9 @@ interface AuthToken {
   token_type: string;
 }
 
-interface Event {
-  eventContext: string;
-  eventDate: string;
-  eventType: string
-}
-
-interface Entity {
-  name: string;
-  job: string;
-  context: string;
-  explicit: string;
-  name_position: number[];
-  context_position: number[]
-}
-
 interface CategoryPrediction {
   main: string | null;
   sub: string | null;
-  entities: Entity[];
-  events: Event[]
 }
 
 interface Toast {
@@ -57,11 +41,18 @@ interface Toast {
 
 interface ArticlesResponse {
   articles: Article[];
-  count: number; // Your backend returns 'count' not 'total'
+  count: number;
 }
 
-// API Base URL - adjust as needed
-const API_BASE_URL = '/api';
+interface VoteResponse {
+  article_id: number;
+  upvotes: number;
+  downvotes: number;
+  user_current_vote: 'up' | 'down' | 'neutral';
+  message: string;
+}
+
+const API_BASE_URL = 'http://localhost:8000/api';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -77,21 +68,18 @@ const App: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   
-  // Form states
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [registerForm, setRegisterForm] = useState({ name: '', email: '', password: '' });
   const [articleForm, setArticleForm] = useState({ title: '', content: '' });
 
   const categories = ['tech', 'sport', 'politics', 'entertainment', 'business'];
 
-  // Authentication
   useEffect(() => {
     if (token) {
       verifyToken();
     }
   }, [token]);
 
-  // Auto-scroll carousel
   useEffect(() => {
     const interval = setInterval(() => {
       if (featuredArticles.length > 0) {
@@ -101,7 +89,6 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [featuredArticles.length]);
 
-  // Load articles on mount
   useEffect(() => {
     if (currentUser) {
       loadArticles();
@@ -118,8 +105,6 @@ const App: React.FC = () => {
       
       if (response.ok) {
         const users = await response.json();
-        // For now, we'll assume the first user is the current user
-        // You might want to add a "me" endpoint to your backend
         if (users.length > 0) {
           setCurrentUser(users[0]);
         }
@@ -136,7 +121,7 @@ const App: React.FC = () => {
   };
 
   const loadArticles = async () => {
-    if (!token) return;
+    if (!token || !currentUser) return;
     
     setIsLoading(true);
     try {
@@ -151,13 +136,26 @@ const App: React.FC = () => {
         });
         
         if (response.ok) {
-          const data: ArticlesResponse = await response.json();
-          allArticles[category] = data.articles || [];
-          
-          // Add to featured if we have less than 5
-          if (featured.length < 5 && data.articles && data.articles.length > 0) {
-            const remainingSlots = 5 - featured.length;
-            featured.push(...data.articles.slice(0, remainingSlots));
+          const data = await response.json();
+          if (data.articles) {
+            const articlesWithVotes = data.articles.map((article: Article) => {
+              const hasVoted = article.voted_users?.includes(currentUser.id) || false;
+              let user_vote: 'up' | 'down' | 'neutral' = 'neutral';
+              
+              // For simplicity, we'll just track if user voted, not the type
+              // In a real app, you'd want to fetch the actual vote type
+              return {
+                ...article,
+                user_vote: hasVoted ? 'up' : 'neutral'
+              };
+            });
+            
+            allArticles[category] = articlesWithVotes;
+            
+            if (featured.length < 5 && articlesWithVotes.length > 0) {
+              const remainingSlots = 5 - featured.length;
+              featured.push(...articlesWithVotes.slice(0, remainingSlots));
+            }
           }
         }
       }
@@ -257,7 +255,6 @@ const App: React.FC = () => {
     setCurrentPage('home');
 
     try {
-      // Step 1: Classify the article
       setPublishProgress(30);
       const categoryResponse = await fetch(`${API_BASE_URL}/category`, {
         method: 'POST',
@@ -270,14 +267,13 @@ const App: React.FC = () => {
         })
       });
 
-      let categories: CategoryPrediction = { main: null, sub: null,  entities: [], events: []};
+      let categories: CategoryPrediction = { main: null, sub: null };
       if (categoryResponse.ok) {
         categories = await categoryResponse.json();
       }
 
       setPublishProgress(60);
 
-      // Step 2: Create the article
       const articleResponse = await fetch(`${API_BASE_URL}/articles/`, {
         method: 'POST',
         headers: {
@@ -288,9 +284,7 @@ const App: React.FC = () => {
           title: articleForm.title,
           content: articleForm.content,
           main_category: categories.main,
-          sub_category: categories.sub,
-          entities: categories.entities,
-          events: categories.events
+          sub_category: categories.sub
         })
       });
 
@@ -303,7 +297,7 @@ const App: React.FC = () => {
           setPublishProgress(0);
           showToast('Article published successfully!', 'success');
           setArticleForm({ title: '', content: '' });
-          loadArticles(); // Refresh articles
+          loadArticles();
         }, 1000);
       } else {
         const errorData = await articleResponse.json();
@@ -317,7 +311,7 @@ const App: React.FC = () => {
   };
 
   const handleVote = async (articleId: number, voteType: 'up' | 'down') => {
-    if (!token) {
+    if (!token || !currentUser) {
       showToast('Please login to vote', 'error');
       return;
     }
@@ -336,24 +330,49 @@ const App: React.FC = () => {
       });
 
       if (response.ok) {
-        showToast(`Article ${voteType}voted!`, 'success');
-        // Refresh articles to show updated vote counts
-        loadArticles();
+        const updatedVote: VoteResponse = await response.json();
         
-        // Update selected article if it's the one being voted on
-        if (selectedArticle && selectedArticle.id === articleId) {
-          if (voteType === 'up') {
-            setSelectedArticle({
-              ...selectedArticle,
-              upvotes: selectedArticle.upvotes + 1
-            });
-          } else {
-            setSelectedArticle({
-              ...selectedArticle,
-              downvotes: selectedArticle.downvotes + 1
+        setArticles(prev => {
+          const newArticles = { ...prev };
+          for (const category in newArticles) {
+            newArticles[category] = newArticles[category].map(article => {
+              if (article.id === articleId) {
+                return { 
+                  ...article, 
+                  upvotes: updatedVote.upvotes,
+                  downvotes: updatedVote.downvotes,
+                  user_vote: updatedVote.user_current_vote
+                };
+              }
+              return article;
             });
           }
+          return newArticles;
+        });
+        
+        setFeaturedArticles(prev => 
+          prev.map(article => 
+            article.id === articleId 
+              ? { 
+                  ...article, 
+                  upvotes: updatedVote.upvotes,
+                  downvotes: updatedVote.downvotes,
+                  user_vote: updatedVote.user_current_vote
+                } 
+              : article
+          )
+        );
+        
+        if (selectedArticle && selectedArticle.id === articleId) {
+          setSelectedArticle({
+            ...selectedArticle,
+            upvotes: updatedVote.upvotes,
+            downvotes: updatedVote.downvotes,
+            user_vote: updatedVote.user_current_vote
+          });
         }
+        
+        showToast(updatedVote.message, 'success');
       } else {
         const errorData = await response.json();
         showToast(errorData.detail || 'Failed to vote', 'error');
@@ -383,18 +402,17 @@ const App: React.FC = () => {
 
   const renderCategoryIcon = (category: string | null) => {
     if (!category) {
-      return <HelpCircle className="w-5 h-5 text-gray-400" />;
+      return <HelpCircle className="w-6 h-6 text-gray-400" />;
     }
-    return <Tag className="w-5 h-5 text-blue-500" />;
+    return <Tag className="w-6 h-6 text-blue-500" />;
   };
 
-  // Components
   const Navigation = () => (
     <nav className="bg-white shadow-lg sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <div 
-            className="text-2xl font-bold text-blue-600 cursor-pointer font-['Poppins']"
+            className="text-2xl md:text-3xl font-bold text-blue-600 cursor-pointer font-['Poppins']"
             onClick={() => setCurrentPage('home')}
           >
             QuickInsight
@@ -405,33 +423,33 @@ const App: React.FC = () => {
               <>
                 <button
                   onClick={() => setCurrentPage('create')}
-                  className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                  className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-lg"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-5 h-5" />
                   <span>Publish</span>
                 </button>
-                <div className="flex items-center space-x-2 text-gray-700">
-                  <User className="w-4 h-4" />
-                  <span className="text-sm">{currentUser.name}</span>
+                <div className="flex items-center space-x-2 text-gray-700 text-lg">
+                  <User className="w-5 h-5" />
+                  <span>{currentUser.name}</span>
                 </div>
                 <button
                   onClick={logout}
                   className="text-gray-500 hover:text-gray-700 transition-colors"
                 >
-                  <LogOut className="w-5 h-5" />
+                  <LogOut className="w-6 h-6" />
                 </button>
               </>
             ) : (
               <div className="flex space-x-4">
                 <button
                   onClick={() => setCurrentPage('login')}
-                  className="text-blue-600 hover:text-blue-700 font-medium"
+                  className="text-blue-600 hover:text-blue-700 font-medium text-lg"
                 >
                   Login
                 </button>
                 <button
                   onClick={() => setCurrentPage('register')}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-lg"
                 >
                   Sign Up
                 </button>
@@ -439,21 +457,19 @@ const App: React.FC = () => {
             )}
           </div>
 
-          {/* Mobile menu button */}
           <div className="md:hidden">
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="text-gray-500 hover:text-gray-700"
             >
-              <Menu className="w-6 h-6" />
+              <Menu className="w-8 h-8" />
             </button>
           </div>
         </div>
 
-        {/* Mobile menu */}
         {isMenuOpen && (
           <div className="md:hidden border-t border-gray-200 pb-4">
-            <div className="pt-4 space-y-2">
+            <div className="pt-4 space-y-3">
               {currentUser ? (
                 <>
                   <button
@@ -461,11 +477,11 @@ const App: React.FC = () => {
                       setCurrentPage('create');
                       setIsMenuOpen(false);
                     }}
-                    className="block w-full text-left px-4 py-2 text-blue-600 hover:bg-gray-50"
+                    className="block w-full text-left px-4 py-3 text-blue-600 hover:bg-gray-50 text-lg"
                   >
                     Publish Article
                   </button>
-                  <div className="px-4 py-2 text-sm text-gray-500">
+                  <div className="px-4 py-2 text-gray-500 text-lg">
                     {currentUser.name}
                   </div>
                   <button
@@ -473,7 +489,7 @@ const App: React.FC = () => {
                       logout();
                       setIsMenuOpen(false);
                     }}
-                    className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-50"
+                    className="block w-full text-left px-4 py-3 text-gray-700 hover:bg-gray-50 text-lg"
                   >
                     Logout
                   </button>
@@ -485,7 +501,7 @@ const App: React.FC = () => {
                       setCurrentPage('login');
                       setIsMenuOpen(false);
                     }}
-                    className="block w-full text-left px-4 py-2 text-blue-600 hover:bg-gray-50"
+                    className="block w-full text-left px-4 py-3 text-blue-600 hover:bg-gray-50 text-lg"
                   >
                     Login
                   </button>
@@ -494,7 +510,7 @@ const App: React.FC = () => {
                       setCurrentPage('register');
                       setIsMenuOpen(false);
                     }}
-                    className="block w-full text-left px-4 py-2 text-blue-600 hover:bg-gray-50"
+                    className="block w-full text-left px-4 py-3 text-blue-600 hover:bg-gray-50 text-lg"
                   >
                     Sign Up
                   </button>
@@ -510,14 +526,14 @@ const App: React.FC = () => {
   const NewsCard = ({ article, size = 'normal' }: { article: Article; size?: 'large' | 'normal' }) => (
     <div
       className={`bg-white rounded-xl shadow-lg overflow-hidden cursor-pointer transform transition-all duration-300 hover:scale-105 hover:shadow-xl ${
-        size === 'large' ? 'h-[28rem]' : 'h-96'
+        size === 'large' ? 'h-[32rem]' : 'h-[28rem]'
       }`}
       onClick={() => {
         setSelectedArticle(article);
         setCurrentPage('article');
       }}
     >
-      <div className={`relative ${size === 'large' ? 'h-56' : 'h-48'}`}>
+      <div className={`relative ${size === 'large' ? 'h-64' : 'h-56'}`}>
         <img
           src={article.image || '/api/placeholder/400/300'}
           alt={article.title}
@@ -529,32 +545,32 @@ const App: React.FC = () => {
         />
         <div className="absolute top-4 left-4 flex items-center space-x-2">
           {renderCategoryIcon(article.main_category)}
-          <span className="text-sm bg-black bg-opacity-60 text-white px-3 py-1 rounded-full font-medium">
+          <span className="text-sm md:text-base bg-black bg-opacity-60 text-white px-3 py-1 rounded-full font-medium">
             {article.main_category || 'Uncategorized'}
           </span>
         </div>
-        <div className="absolute top-4 right-4 flex items-center space-x-2 bg-black bg-opacity-60 text-white px-3 py-2 rounded-full text-sm font-medium">
-          <ThumbsUp className="w-4 h-4" />
+        <div className="absolute top-4 right-4 flex items-center space-x-2 bg-black bg-opacity-60 text-white px-3 py-2 rounded-full text-sm md:text-base font-medium">
+          <ThumbsUp className={`w-5 h-5 ${article.user_vote === 'up' ? 'text-green-400' : ''}`} />
           <span>{article.upvotes}</span>
-          <ThumbsDown className="w-4 h-4" />
+          <ThumbsDown className={`w-5 h-5 ${article.user_vote === 'down' ? 'text-red-400' : ''}`} />
           <span>{article.downvotes}</span>
         </div>
       </div>
       
-      <div className="p-5">
-        <h3 className={`font-bold text-gray-900 mb-3 line-clamp-2 font-['Poppins'] ${
-          size === 'large' ? 'text-xl' : 'text-lg'
+      <div className="p-6">
+        <h3 className={`font-bold text-gray-900 mb-4 line-clamp-2 font-['Poppins'] ${
+          size === 'large' ? 'text-2xl' : 'text-xl'
         }`}>
           {article.title}
         </h3>
         
-        <p className="text-gray-600 text-base mb-4 line-clamp-3 font-['Montserrat'] leading-relaxed">
+        <p className="text-gray-600 mb-5 line-clamp-3 font-['Montserrat'] leading-relaxed text-lg">
           {article.content}
         </p>
         
-        <div className="flex items-center justify-between text-sm text-gray-500">
+        <div className="flex items-center justify-between text-base text-gray-500">
           <div className="flex items-center space-x-2">
-            <Clock className="w-4 h-4" />
+            <Clock className="w-5 h-5" />
             <span className="font-medium">{formatDate(article.published_at)}</span>
           </div>
           <span className="font-semibold text-blue-600">{article.publisher}</span>
@@ -568,7 +584,7 @@ const App: React.FC = () => {
 
     return (
       <div className="relative mb-16">
-        <div className="relative h-[28rem] rounded-2xl overflow-hidden">
+        <div className="relative h-[32rem] md:h-[40rem] rounded-2xl overflow-hidden">
           {featuredArticles.map((article, index) => (
             <div
               key={article.id}
@@ -586,21 +602,21 @@ const App: React.FC = () => {
                 }}
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent">
-                <div className="absolute bottom-0 left-0 right-0 p-10">
-                  <div className="flex items-center space-x-3 mb-4">
+                <div className="absolute bottom-0 left-0 right-0 p-6 md:p-10">
+                  <div className="flex flex-wrap items-center gap-3 mb-4">
                     {renderCategoryIcon(article.main_category)}
-                    <span className="text-base bg-blue-600 text-white px-4 py-2 rounded-full font-semibold">
+                    <span className="text-base md:text-lg bg-blue-600 text-white px-4 py-2 rounded-full font-semibold">
                       {article.main_category || 'Uncategorized'}
                     </span>
-                    <div className="flex items-center space-x-3 bg-black bg-opacity-60 text-white px-4 py-2 rounded-full text-sm font-medium">
-                      <ThumbsUp className="w-5 h-5" />
+                    <div className="flex items-center space-x-3 bg-black bg-opacity-60 text-white px-4 py-2 rounded-full text-base md:text-lg font-medium">
+                      <ThumbsUp className={`w-5 h-5 md:w-6 md:h-6 ${article.user_vote === 'up' ? 'text-green-400' : ''}`} />
                       <span>{article.upvotes}</span>
-                      <ThumbsDown className="w-5 h-5" />
+                      <ThumbsDown className={`w-5 h-5 md:w-6 md:h-6 ${article.user_vote === 'down' ? 'text-red-400' : ''}`} />
                       <span>{article.downvotes}</span>
                     </div>
                   </div>
                   <h2 
-                    className="text-4xl md:text-5xl font-bold text-white mb-4 cursor-pointer hover:text-blue-200 transition-colors font-['Poppins'] leading-tight"
+                    className="text-3xl md:text-5xl lg:text-6xl font-bold text-white mb-4 cursor-pointer hover:text-blue-200 transition-colors font-['Poppins'] leading-tight"
                     onClick={() => {
                       setSelectedArticle(article);
                       setCurrentPage('article');
@@ -608,7 +624,7 @@ const App: React.FC = () => {
                   >
                     {article.title}
                   </h2>
-                  <div className="flex items-center space-x-6 text-white/90 text-lg">
+                  <div className="flex flex-wrap items-center gap-3 text-white/90 text-lg md:text-xl">
                     <span className="font-semibold">{article.publisher}</span>
                     <span>•</span>
                     <span>{formatDate(article.published_at)}</span>
@@ -653,7 +669,7 @@ const App: React.FC = () => {
     return (
       <div className="mb-16">
         <div className="flex items-center justify-between mb-8">
-          <h2 className="text-3xl font-bold text-gray-900 capitalize font-['Poppins']">
+          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 capitalize font-['Poppins']">
             {category}
           </h2>
           <div className="flex space-x-3">
@@ -674,11 +690,11 @@ const App: React.FC = () => {
         
         <div
           ref={scrollRef}
-          className="flex space-x-8 overflow-x-auto scrollbar-hide pb-6"
+          className="flex space-x-6 overflow-x-auto scrollbar-hide pb-6"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           {categoryArticles.map((article) => (
-            <div key={article.id} className="flex-shrink-0 w-96">
+            <div key={article.id} className="flex-shrink-0 w-80 md:w-96">
               <NewsCard article={article} />
             </div>
           ))}
@@ -694,16 +710,16 @@ const App: React.FC = () => {
           <div className="mb-4">
             <CheckCircle className="w-16 h-16 text-blue-600 mx-auto animate-pulse" />
           </div>
-          <h3 className="text-xl font-bold text-gray-900 mb-4 font-['Poppins']">
+          <h3 className="text-2xl font-bold text-gray-900 mb-4 font-['Poppins']">
             Publishing Your Article
           </h3>
-          <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
+          <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
             <div
-              className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+              className="bg-blue-600 h-3 rounded-full transition-all duration-500"
               style={{ width: `${publishProgress}%` }}
             />
           </div>
-          <p className="text-gray-600 text-sm font-['Montserrat']">
+          <p className="text-gray-600 text-lg font-['Montserrat']">
             {publishProgress < 30 && "Analyzing content..."}
             {publishProgress >= 30 && publishProgress < 60 && "Classifying article..."}
             {publishProgress >= 60 && publishProgress < 90 && "Creating article..."}
@@ -715,46 +731,45 @@ const App: React.FC = () => {
   );
 
   const LoadingSpinner = () => (
-    <div className="flex items-center justify-center py-8">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    <div className="flex items-center justify-center py-12">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
     </div>
   );
 
   const Toast = ({ toast }: { toast: Toast }) => (
-    <div className={`fixed top-20 right-4 z-50 px-6 py-3 rounded-lg shadow-lg flex items-center space-x-2 ${
+    <div className={`fixed top-20 right-4 z-50 px-6 py-4 rounded-lg shadow-lg flex items-center space-x-3 text-lg ${
       toast.type === 'success' ? 'bg-green-500 text-white' :
       toast.type === 'error' ? 'bg-red-500 text-white' :
       'bg-blue-500 text-white'
     }`}>
-      {toast.type === 'success' && <CheckCircle className="w-5 h-5" />}
-      {toast.type === 'error' && <X className="w-5 h-5" />}
+      {toast.type === 'success' && <CheckCircle className="w-6 h-6" />}
+      {toast.type === 'error' && <X className="w-6 h-6" />}
       <span className="font-['Montserrat']">{toast.message}</span>
     </div>
   );
 
-  // Page renders
   if (!currentUser && currentPage === 'home') {
     return (
       <div className="min-h-screen bg-gray-50 font-['Montserrat']">
         <Navigation />
         <div className="max-w-6xl mx-auto px-4 py-20 text-center">
-          <h1 className="text-6xl font-bold text-gray-900 mb-8 font-['Poppins']">
+          <h1 className="text-4xl md:text-6xl font-bold text-gray-900 mb-8 font-['Poppins']">
             Welcome to QuickInsight
           </h1>
-          <p className="text-2xl text-gray-600 mb-12 leading-relaxed max-w-4xl mx-auto">
+          <p className="text-xl md:text-2xl text-gray-600 mb-12 leading-relaxed max-w-4xl mx-auto">
             Your premier destination for AI-powered news categorization and insights. 
             Discover, read, and publish articles with intelligent categorization.
           </p>
           <div className="flex flex-col sm:flex-row gap-6 justify-center">
             <button
               onClick={() => setCurrentPage('login')}
-              className="bg-blue-600 text-white px-10 py-4 rounded-xl text-xl font-semibold hover:bg-blue-700 transition-colors transform hover:scale-105 duration-200 shadow-lg"
+              className="bg-blue-600 text-white px-8 md:px-10 py-4 rounded-xl text-xl font-semibold hover:bg-blue-700 transition-colors transform hover:scale-105 duration-200 shadow-lg"
             >
               Get Started
             </button>
             <button
               onClick={() => setCurrentPage('register')}
-              className="border-2 border-blue-600 text-blue-600 px-10 py-4 rounded-xl text-xl font-semibold hover:bg-blue-50 transition-colors"
+              className="border-2 border-blue-600 text-blue-600 px-8 md:px-10 py-4 rounded-xl text-xl font-semibold hover:bg-blue-50 transition-colors"
             >
               Sign Up
             </button>
@@ -768,25 +783,25 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-gray-50 font-['Montserrat']">
         <Navigation />
-        <div className="max-w-lg mx-auto px-4 py-16">
-          <div className="bg-white rounded-2xl shadow-xl p-10">
-            <h2 className="text-3xl font-bold text-center mb-8 font-['Poppins']">Login</h2>
+        <div className="max-w-md mx-auto px-4 py-12 md:py-16">
+          <div className="bg-white rounded-2xl shadow-xl p-8 md:p-10">
+            <h2 className="text-3xl md:text-4xl font-bold text-center mb-8 font-['Poppins']">Login</h2>
             <div className="space-y-6">
               <div>
-                <label className="block text-lg font-semibold text-gray-700 mb-2">Email</label>
+                <label className="block text-xl font-semibold text-gray-700 mb-3">Email</label>
                 <input
                   type="email"
-                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
+                  className="w-full px-5 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
                   value={loginForm.email}
                   onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
                   onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
                 />
               </div>
               <div>
-                <label className="block text-lg font-semibold text-gray-700 mb-2">Password</label>
+                <label className="block text-xl font-semibold text-gray-700 mb-3">Password</label>
                 <input
                   type="password"
-                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
+                  className="w-full px-5 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
                   value={loginForm.password}
                   onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
                   onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
@@ -794,7 +809,7 @@ const App: React.FC = () => {
               </div>
               <button
                 onClick={handleLogin}
-                className="w-full bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 transition-colors font-semibold text-lg"
+                className="w-full bg-blue-600 text-white py-4 rounded-xl hover:bg-blue-700 transition-colors font-semibold text-xl"
               >
                 Login
               </button>
@@ -818,33 +833,33 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-gray-50 font-['Montserrat']">
         <Navigation />
-        <div className="max-w-lg mx-auto px-4 py-16">
-          <div className="bg-white rounded-2xl shadow-xl p-10">
-            <h2 className="text-3xl font-bold text-center mb-8 font-['Poppins']">Sign Up</h2>
+        <div className="max-w-md mx-auto px-4 py-12 md:py-16">
+          <div className="bg-white rounded-2xl shadow-xl p-8 md:p-10">
+            <h2 className="text-3xl md:text-4xl font-bold text-center mb-8 font-['Poppins']">Sign Up</h2>
             <div className="space-y-6">
               <div>
-                <label className="block text-lg font-semibold text-gray-700 mb-2">Name</label>
+                <label className="block text-xl font-semibold text-gray-700 mb-3">Name</label>
                 <input
                   type="text"
-                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
+                  className="w-full px-5 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
                   value={registerForm.name}
                   onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-lg font-semibold text-gray-700 mb-2">Email</label>
+                <label className="block text-xl font-semibold text-gray-700 mb-3">Email</label>
                 <input
                   type="email"
-                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
+                  className="w-full px-5 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
                   value={registerForm.email}
                   onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
                 />
               </div>
               <div>
-                <label className="block text-lg font-semibold text-gray-700 mb-2">Password</label>
+                <label className="block text-xl font-semibold text-gray-700 mb-3">Password</label>
                 <input
                   type="password"
-                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
+                  className="w-full px-5 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
                   value={registerForm.password}
                   onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
                   onKeyPress={(e) => e.key === 'Enter' && handleRegister()}
@@ -852,7 +867,7 @@ const App: React.FC = () => {
               </div>
               <button
                 onClick={handleRegister}
-                className="w-full bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 transition-colors font-semibold text-lg"
+                className="w-full bg-blue-600 text-white py-4 rounded-xl hover:bg-blue-700 transition-colors font-semibold text-xl"
               >
                 Sign Up
               </button>
@@ -876,23 +891,23 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-gray-50 font-['Montserrat']">
         <Navigation />
-        <div className="w-full max-w-6xl mx-auto px-6 py-10">
-          <div className="bg-white rounded-2xl shadow-xl p-10">
-            <div className="text-center mb-10">
-              <h2 className="text-4xl font-bold mb-4 font-['Poppins'] text-gray-900">
+        <div className="w-full max-w-6xl mx-auto px-4 md:px-6 py-8 md:py-10">
+          <div className="bg-white rounded-2xl shadow-xl p-6 md:p-10">
+            <div className="text-center mb-8 md:mb-10">
+              <h2 className="text-3xl md:text-4xl font-bold mb-4 font-['Poppins'] text-gray-900">
                 Publish New Article
               </h2>
-              <p className="text-lg text-gray-600">
+              <p className="text-lg md:text-xl text-gray-600">
                 Share your story with the world. Our AI will automatically categorize your content.
               </p>
             </div>
             
             <div className="space-y-8">
               <div>
-                <label className="block text-lg font-semibold text-gray-700 mb-3">Article Title</label>
+                <label className="block text-xl font-semibold text-gray-700 mb-3">Article Title</label>
                 <input
                   type="text"
-                  className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xl font-['Poppins'] transition-colors"
+                  className="w-full px-5 md:px-6 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xl md:text-2xl font-['Poppins'] transition-colors"
                   value={articleForm.title}
                   onChange={(e) => setArticleForm({ ...articleForm, title: e.target.value })}
                   placeholder="Enter a compelling title for your article..."
@@ -900,24 +915,24 @@ const App: React.FC = () => {
               </div>
               
               <div>
-                <label className="block text-lg font-semibold text-gray-700 mb-3">Article Content</label>
+                <label className="block text-xl font-semibold text-gray-700 mb-3">Article Content</label>
                 <div className="relative">
                   <textarea
                     rows={20}
-                    className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-lg leading-relaxed font-['Montserrat'] transition-colors"
+                    className="w-full px-5 md:px-6 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-lg md:text-xl leading-relaxed font-['Montserrat'] transition-colors"
                     value={articleForm.content}
                     onChange={(e) => setArticleForm({ ...articleForm, content: e.target.value })}
                     placeholder="Write your article content here... Tell your story, share your insights, and engage with your readers."
                   />
-                  <div className="absolute bottom-4 right-4 text-sm text-gray-400">
+                  <div className="absolute bottom-4 right-4 text-base text-gray-400">
                     {articleForm.content.length} characters
                   </div>
                 </div>
               </div>
               
-              <div className="bg-blue-50 rounded-xl p-6">
-                <h3 className="text-lg font-semibold text-blue-900 mb-2 font-['Poppins']">AI-Powered Categorization</h3>
-                <p className="text-blue-700">
+              <div className="bg-blue-50 rounded-xl p-5 md:p-6">
+                <h3 className="text-xl font-semibold text-blue-900 mb-3 font-['Poppins']">AI-Powered Categorization</h3>
+                <p className="text-blue-700 text-lg">
                   Once you publish, our AI will automatically analyze your content and assign appropriate categories to help readers discover your article.
                 </p>
               </div>
@@ -925,13 +940,13 @@ const App: React.FC = () => {
               <div className="flex flex-col sm:flex-row gap-4 pt-4">
                 <button
                   onClick={handlePublishArticle}
-                  className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-xl text-lg font-semibold hover:bg-blue-700 transition-colors transform hover:scale-105 duration-200 shadow-lg"
+                  className="flex-1 bg-blue-600 text-white px-6 md:px-8 py-4 rounded-xl text-lg md:text-xl font-semibold hover:bg-blue-700 transition-colors transform hover:scale-105 duration-200 shadow-lg"
                 >
                   Publish Article
                 </button>
                 <button
                   onClick={() => setCurrentPage('home')}
-                  className="flex-1 border-2 border-gray-300 text-gray-700 px-8 py-4 rounded-xl text-lg font-semibold hover:bg-gray-50 transition-colors"
+                  className="flex-1 border-2 border-gray-300 text-gray-700 px-6 md:px-8 py-4 rounded-xl text-lg md:text-xl font-semibold hover:bg-gray-50 transition-colors"
                 >
                   Cancel
                 </button>
@@ -947,20 +962,20 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-gray-50 font-['Montserrat']">
         <Navigation />
-        <div className="w-full max-w-[70vw] mx-auto px-6 py-10">
+        <div className="w-full max-w-4xl lg:max-w-6xl mx-auto px-4 md:px-6 py-8 md:py-10">
           <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-            <div className="p-10">
-              <h1 className="text-5xl font-bold text-gray-900 mb-8 font-['Poppins'] leading-tight">
+            <div className="p-6 md:p-10">
+              <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-gray-900 mb-6 md:mb-8 font-['Poppins'] leading-tight">
                 {selectedArticle.title}
               </h1>
               
-              <div className="flex flex-wrap items-center gap-6 mb-8 text-base text-gray-600">
+              <div className="flex flex-wrap items-center gap-4 md:gap-6 mb-6 md:mb-8 text-base md:text-lg text-gray-600">
                 <div className="flex items-center space-x-2">
-                  <Clock className="w-5 h-5" />
+                  <Clock className="w-5 h-5 md:w-6 md:h-6" />
                   <span className="font-medium">{formatDate(selectedArticle.published_at)}</span>
                 </div>
                 <span className="text-gray-300">•</span>
-                <span className="font-semibold text-blue-600 text-lg">{selectedArticle.publisher}</span>
+                <span className="font-semibold text-blue-600 text-lg md:text-xl">{selectedArticle.publisher}</span>
                 <span className="text-gray-300">•</span>
                 <div className="flex items-center space-x-2">
                   {renderCategoryIcon(selectedArticle.main_category)}
@@ -969,7 +984,7 @@ const App: React.FC = () => {
                 {selectedArticle.sub_category && (
                   <>
                     <span className="text-gray-300">•</span>
-                    <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                    <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm md:text-base font-medium">
                       {selectedArticle.sub_category}
                     </span>
                   </>
@@ -980,42 +995,54 @@ const App: React.FC = () => {
             <img
               src={selectedArticle.image || '/api/placeholder/800/400'}
               alt={selectedArticle.title}
-              className="w-full h-96 object-cover"
+              className="w-full h-64 md:h-96 object-cover"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
                 target.src = 'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=800&h=400&fit=crop';
               }}
             />
             
-            <div className="p-10">
-              <div className="prose prose-xl max-w-none">
+            <div className="p-6 md:p-10">
+              <div className="prose prose-lg md:prose-xl max-w-none">
                 {selectedArticle.content.split('\n').map((paragraph, index) => (
-                  <p key={index} className="mb-6 text-gray-800 leading-relaxed text-lg">
+                  <p key={index} className="mb-6 text-gray-800 leading-relaxed text-lg md:text-xl">
                     {paragraph}
                   </p>
                 ))}
               </div>
               
-              <div className="mt-12 pt-8 border-t-2 border-gray-100 flex items-center justify-between">
-                <div className="flex items-center space-x-6">
+              <div className="mt-8 md:mt-12 pt-6 md:pt-8 border-t-2 border-gray-100 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center space-x-4 md:space-x-6">
                   <button
                     onClick={() => handleVote(selectedArticle.id, 'up')}
-                    className="flex items-center space-x-3 bg-green-100 text-green-700 px-6 py-3 rounded-xl hover:bg-green-200 transition-colors font-semibold text-lg"
+                    className={`flex items-center space-x-3 px-6 py-3 rounded-xl transition-colors font-semibold text-lg ${
+                      selectedArticle.user_vote === 'up'
+                        ? 'bg-green-500 text-white'
+                        : selectedArticle.user_vote === 'neutral'
+                        ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
                   >
-                    <ThumbsUp className="w-6 h-6" />
+                    <ThumbsUp className="w-6 h-6 md:w-7 md:h-7" />
                     <span>{selectedArticle.upvotes}</span>
                   </button>
                   <button
                     onClick={() => handleVote(selectedArticle.id, 'down')}
-                    className="flex items-center space-x-3 bg-red-100 text-red-700 px-6 py-3 rounded-xl hover:bg-red-200 transition-colors font-semibold text-lg"
+                    className={`flex items-center space-x-3 px-6 py-3 rounded-xl transition-colors font-semibold text-lg ${
+                      selectedArticle.user_vote === 'down'
+                        ? 'bg-red-500 text-white'
+                        : selectedArticle.user_vote === 'neutral'
+                        ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
                   >
-                    <ThumbsDown className="w-6 h-6" />
+                    <ThumbsDown className="w-6 h-6 md:w-7 md:h-7" />
                     <span>{selectedArticle.downvotes}</span>
                   </button>
                 </div>
                 <button
                   onClick={() => setCurrentPage('home')}
-                  className="bg-blue-600 text-white px-8 py-3 rounded-xl hover:bg-blue-700 transition-colors text-lg font-semibold"
+                  className="bg-blue-600 text-white px-6 md:px-8 py-3 rounded-xl hover:bg-blue-700 transition-colors text-lg font-semibold w-full md:w-auto"
                 >
                   Back to Home
                 </button>
@@ -1027,12 +1054,11 @@ const App: React.FC = () => {
     );
   }
 
-  // Home page
   return (
     <div className="min-h-screen bg-gray-50 font-['Montserrat']">
       <Navigation />
       
-      <div className="max-w-7xl mx-auto px-4 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 md:py-8">
         {isLoading ? (
           <LoadingSpinner />
         ) : (
@@ -1043,20 +1069,17 @@ const App: React.FC = () => {
               <CategorySection key={category} category={category} />
             ))}
 
-            {/* Show message if no articles */}
             {Object.keys(articles).length === 0 && !isLoading && (
               <div className="text-center py-12">
-                <p className="text-gray-500 text-lg">No articles available. Be the first to publish!</p>
+                <p className="text-gray-500 text-xl">No articles available. Be the first to publish!</p>
               </div>
             )}
           </>
         )}
       </div>
 
-      {/* Publishing progress overlay */}
       {isPublishing && <PublishProgress />}
 
-      {/* Toast notifications */}
       {toasts.map((toast) => (
         <Toast key={toast.id} toast={toast} />
       ))}
