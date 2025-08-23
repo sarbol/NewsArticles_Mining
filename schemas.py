@@ -63,6 +63,11 @@ class VoteCreate:
     article_id: int
     vote_type: str  # 'up' or 'down'
 
+@dataclass
+class userVote:
+    user_id: int
+    vote_type: str
+
 
 @dataclass
 class ArticleResponse:
@@ -74,13 +79,14 @@ class ArticleResponse:
     published_at: datetime
     upvotes: int
     downvotes: int
-    main_category: Optional[str] = None
-    sub_category: Optional[str] = None
+    voted_users: List[userVote]
     entities: List[entityObject]
     events: List[eventObject]
+    main_category: Optional[str] = None
+    sub_category: Optional[str] = None
 
 
 @dataclass
 class PaginatedArticles:
-    count: int
+    total: int
     articles: list[ArticleResponse]
