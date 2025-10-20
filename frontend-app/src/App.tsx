@@ -175,15 +175,16 @@ const App: React.FC = () => {
           }
         }
       }
-
-      setArticles(allArticles);
-      setFeaturedArticles(featured);
-    } catch (error) {
-      showToast('Failed to load articles', 'error');
-    } finally {
-      setIsLoading(false);
     }
-  };
+
+    setArticles(allArticles);
+    setFeaturedArticles(featured);
+  } catch (error) {
+    showToast('Failed to load articles', 'error');
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const showToast = (message: string, type: Toast['type'] = 'info') => {
     const id = Date.now();
