@@ -12,10 +12,14 @@ import schemas
 import uvicorn
 import utility
 from fastapi import FastAPI, HTTPException, status, Depends, Query
+from fastapi.exceptions import ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles  # Add this import
+from fastapi.responses import FileResponse  # Add this import
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
+from pathlib import Path  # Add this import
 import models
 import database
 import crud
@@ -36,7 +40,12 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "*"
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",  # Vite dev server
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",  # Same origin
+        "http://127.0.0.1:8000",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -68,25 +77,68 @@ async def root():
     return {"message": "Welcome to the News Category Prediction API"}
 
 
-@app.post("/api/category", status_code = status.HTTP_200_OK, response_model=schemas.Category)
+@app.post("/api/category", status_code=status.HTTP_200_OK, response_model=schemas.Category)
 def predict_category(article: schemas.Article):
-    if article.title:
-        content = article.title + "\n" + article.content
-    else:
-        content = article.content
-    
-    response = utility.news_classification(content, embedding_model, inference_obj)
-    
-    if response:
-        return {
-            "main": response.get("category"),
-            "sub": response.get("sub_category")
-        }
-    
-    return {
-        "main": None,
-        "sub": None
-    }
+    try:
+        if article.title:
+            content = article.title + "\n" + article.content
+        else:
+            content = article.content
+        
+        print(f"Content:\n {content}")
+
+        response = utility.news_classification(content, embedding_model, inference_obj)
+        events = utility.llm_wrapper(content, task="event")
+        entities = utility.llm_wrapper(content, task="entity")
+
+        for entity in entities:
+            name_position = utility.find_query_in_article(entity.get("name"), content)
+            context_position = utility.find_query_in_article(entity.get("context"), content)
+            if not entity.get("name"):
+                entity["name"] = ""
+            if not entity.get("job"):
+                entity["job"] = ""
+            if not entity.get("context"):
+                entity["context"] = ""
+            if not entity.get("explicit"):
+                entity["explicit"] = "false"
+            entity["name_position"] = name_position or []
+            entity["context_position"] = context_position or []
+        
+        for event in events:
+            if not event.get("eventContext"):
+                event["eventContext"] = ""
+            if not event.get("eventDate"):
+                event["eventDate"] = ""
+            if not event.get("eventType"):
+                event["eventType"] = ""
+
+        if response:
+            return {
+                "main_category": response.get("category"),
+                "sub_category": response.get("sub_category"),
+                "entities": entities,
+                "events": events
+            }
+        
+        return {"main_category": None, "sub_category": None, "entities": [], "events": []}
+
+    except ResponseValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": e.errors(),
+                "payload": article.dict()
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": str(e),
+                "payload": article.dict()
+            }
+        )
 
 
 @app.post("/api/register", response_model=schemas.Token)
@@ -129,8 +181,8 @@ def vote_article(vote: schemas.VoteCreate, db: Session = Depends(get_db), curren
     return crud.make_vote(db, current_user.id, vote)
 
 @app.get("/api/users/")
-def read_users(db: Session = Depends(get_db)):
-    return db.query(models.User).all()
+def read_users(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    return [current_user]
 
 
 @app.get("/api/articles/paginated", response_model = schemas.PaginatedArticles)
@@ -138,6 +190,34 @@ def read_articles_paginated(main_category: str, limit: int = Query(10, ge=1, le=
                             offset: int = Query(0, ge=0), db: Session = Depends(get_db)):
      
     return crud.get_articles_by_category(db, main_category, limit, offset)
+
+
+# Static file serving for frontend
+static_dir = Path("static")
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+    
+    # Serve React app for all non-API routes
+    @app.get("/{full_path:path}")
+    async def serve_react_app(full_path: str):
+        """
+        Serve the React app for all routes that don't start with /api
+        This enables React Router to work properly
+        """
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        
+        # Try to serve the requested file
+        file_path = static_dir / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        
+        # For all other routes, serve the React index.html (SPA routing)
+        index_file = static_dir / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+        
+        raise HTTPException(status_code=404, detail="File not found")
 
 
 if __name__ == "__main__":

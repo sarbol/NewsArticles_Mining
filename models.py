@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, TIMESTAMP
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, TIMESTAMP, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -33,6 +33,8 @@ class Article(Base):
     published_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     upvotes = Column(Integer, default=0)
     downvotes = Column(Integer, default=0)
+    entities = Column(JSON)
+    events = Column(JSON)
     publisher = relationship("Publisher", back_populates="articles")
     votes = relationship("Vote", back_populates="article", cascade="all, delete-orphan")
     image = relationship("Image", back_populates = "article")

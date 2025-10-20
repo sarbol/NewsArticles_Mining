@@ -7,13 +7,18 @@ Considering this task is niche with access to large volume of news corpus, this 
 
 ## 🎯 OBJECTIVES
 
-- ✅ **Clustering to identify article categories and sub-categories** *(Current Implementation)*
-- 🔄 **Entity Recognition to identify media personalities and their jobs** *(In Progress)*
-- 📋 **Key Event Summary** *(Planned)*
-- ⚡ **Lightweight Inference Pipeline for local serving** *(Planned)*
-- 📊 **Accuracy Evaluation and Performance Benchmark** *(Planned)*
-- 🚀 **API Service** *(Planned)*
-- 🖥️ **Frontend Client** *(Planned)*
+- ✅ **Clustering to identify article categories and sub-categories** 
+- 🔄 **Entity Recognition to identify media personalities and their jobs** 
+- 📋 **Key Event Summary** 
+- ⚡ **Lightweight Inference Pipeline for local serving** 
+- 📊 **Accuracy Evaluation and Performance Benchmark** 
+- 🚀 **API Service** 
+- 🖥️ **Frontend Client**
+
+
+![App Article page](assets/homepage.png)
+
+[🚀 Try Live Demo](https://newsinsights-619021297489.europe-west2.run.app/)
 
 ## 🔬 METHODOLOGY
 
@@ -57,6 +62,12 @@ The current implementation focuses on **unsupervised clustering** of news articl
 `conda activate newsAnalysis`  
 `python -m pip install --upgrade pip setuptools wheel`  
 `python -m pip install -r requirements.txt`
+
+### Docker Run
+`docker build --no-cache -t newsapp .`  
+`docker run --name newsapp -e HF_TOKEN=<TOKEN> -e AUTH_SECRET_KEY=<SECRET_KEY> -d -p 8000:8000 newsapp:latest`
+
+> Navigate to  `http://localhost:8000/`
 
 ### Dataset Setup
 The current implementation uses the [BBC News raw dataset](http://mlg.ucd.ie/datasets/bbc.html). Ensure your data is structured as:

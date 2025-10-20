@@ -78,6 +78,8 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+BBC_DATASET_ANNOTATION.ipynb
+LLAMA_NOTEBOOK.ipynb
 
 # IPython
 profile_default/
@@ -211,3 +213,7 @@ __marimo__/
 # Marimo cache
 clean_notebook.py
 change-commit-date.sh
+
+# helper scripts
+populate.py
+test.py

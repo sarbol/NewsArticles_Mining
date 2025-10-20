@@ -1,7 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, User, LogOut, Plus, Clock, Tag, HelpCircle, CheckCircle, X, Menu, ThumbsUp, ThumbsDown } from 'lucide-react';
 
-// Types matching your backend schema
+interface Event {
+  eventContext: string;
+  eventDate: string;
+  eventType: string;
+}
+
+interface Entity {
+  name: string;
+  job: string;
+  context: string;
+  explicit: string;
+  name_position: number[];
+  context_position: number[];
+}
+
+interface VotedUser {
+  user_id: number;
+  vote_type: 'up' | 'down';
+}
+
 interface Article {
   id: number;
   title: string;
@@ -13,7 +32,10 @@ interface Article {
   downvotes: number;
   publisher: string;
   image: string;
-  user_vote?: 'up' | 'down' | null;
+  voted_users?: VotedUser[];
+  entities: Entity[];
+  events: Event[];
+  user_vote?: 'up' | 'down' | 'neutral';
 }
 
 interface User {
@@ -28,8 +50,10 @@ interface AuthToken {
 }
 
 interface CategoryPrediction {
-  main: string | null;
-  sub: string | null;
+  main_category: string | null;
+  sub_category: string | null;
+  entities: Entity[];
+  events: Event[];
 }
 
 interface Toast {
@@ -38,12 +62,15 @@ interface Toast {
   type: 'success' | 'error' | 'info';
 }
 
-interface ArticlesResponse {
-  articles: Article[];
-  count: number;
+interface VoteResponse {
+  article_id: number;
+  upvotes: number;
+  downvotes: number;
+  user_current_vote: 'up' | 'down' | 'neutral';
+  message: string;
 }
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = '/api';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -58,6 +85,7 @@ const App: React.FC = () => {
   const [publishProgress, setPublishProgress] = useState(0);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
   
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [registerForm, setRegisterForm] = useState({ name: '', email: '', password: '' });
@@ -112,50 +140,38 @@ const App: React.FC = () => {
   };
 
   const loadArticles = async () => {
-  if (!token) return;
-  
-  setIsLoading(true);
-  try {
-    const allArticles: { [category: string]: Article[] } = {};
-    const featured: Article[] = [];
+    if (!token || !currentUser) return;
+    
+    setIsLoading(true);
+    try {
+      const allArticles: { [category: string]: Article[] } = {};
+      const featured: Article[] = [];
 
-    for (const category of categories) {
-      const response = await fetch(`${API_BASE_URL}/articles/paginated?main_category=${category}&limit=10&offset=0`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      if (response.ok) {
-        const data: ArticlesResponse = await response.json();
-        if (data.articles) {
-          // Fetch user votes for each article
-          const articlesWithVotes = await Promise.all(
-            data.articles.map(async (article) => {
-              try {
-                const voteResponse = await fetch(`${API_BASE_URL}/articles/${article.id}/vote`, {
-                  headers: {
-                    'Authorization': `Bearer ${token}`
-                  }
-                });
-                
-                if (voteResponse.ok) {
-                  const voteData = await voteResponse.json();
-                  return { ...article, user_vote: voteData.vote_type };
-                }
-                return article;
-              } catch (error) {
-                return article;
-              }
-            })
-          );
-          
-          allArticles[category] = articlesWithVotes;
-          
-          // Add to featured if we have less than 5
-          if (featured.length < 5 && articlesWithVotes.length > 0) {
-            const remainingSlots = 5 - featured.length;
-            featured.push(...articlesWithVotes.slice(0, remainingSlots));
+      for (const category of categories) {
+        const response = await fetch(`${API_BASE_URL}/articles/paginated?main_category=${category}&limit=10&offset=0`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.articles) {
+            const articlesWithVotes = data.articles.map((article: Article) => {
+              const userVote = article.voted_users?.find(vote => vote.user_id === currentUser.id);
+              
+              return {
+                ...article,
+                user_vote: userVote ? userVote.vote_type : 'neutral'
+              };
+            });
+            
+            allArticles[category] = articlesWithVotes;
+            
+            if (featured.length < 5 && articlesWithVotes.length > 0) {
+              const remainingSlots = 5 - featured.length;
+              featured.push(...articlesWithVotes.slice(0, remainingSlots));
+            }
           }
         }
       }
@@ -268,7 +284,7 @@ const App: React.FC = () => {
         })
       });
 
-      let categories: CategoryPrediction = { main: null, sub: null };
+      let categories: CategoryPrediction = { main_category: null, sub_category: null, entities: [], events: [] };
       if (categoryResponse.ok) {
         categories = await categoryResponse.json();
       }
@@ -284,8 +300,10 @@ const App: React.FC = () => {
         body: JSON.stringify({
           title: articleForm.title,
           content: articleForm.content,
-          main_category: categories.main,
-          sub_category: categories.sub
+          main_category: categories.main_category,
+          sub_category: categories.sub_category,
+          entities: categories.entities,
+          events: categories.events
         })
       });
 
@@ -331,7 +349,7 @@ const App: React.FC = () => {
       });
 
       if (response.ok) {
-        const updatedArticle = await response.json();
+        const updatedVote: VoteResponse = await response.json();
         
         setArticles(prev => {
           const newArticles = { ...prev };
@@ -340,9 +358,9 @@ const App: React.FC = () => {
               if (article.id === articleId) {
                 return { 
                   ...article, 
-                  upvotes: updatedArticle.upvotes,
-                  downvotes: updatedArticle.downvotes,
-                  user_vote: updatedArticle.user_vote
+                  upvotes: updatedVote.upvotes,
+                  downvotes: updatedVote.downvotes,
+                  user_vote: updatedVote.user_current_vote
                 };
               }
               return article;
@@ -356,9 +374,9 @@ const App: React.FC = () => {
             article.id === articleId 
               ? { 
                   ...article, 
-                  upvotes: updatedArticle.upvotes,
-                  downvotes: updatedArticle.downvotes,
-                  user_vote: updatedArticle.user_vote
+                  upvotes: updatedVote.upvotes,
+                  downvotes: updatedVote.downvotes,
+                  user_vote: updatedVote.user_current_vote
                 } 
               : article
           )
@@ -367,13 +385,13 @@ const App: React.FC = () => {
         if (selectedArticle && selectedArticle.id === articleId) {
           setSelectedArticle({
             ...selectedArticle,
-            upvotes: updatedArticle.upvotes,
-            downvotes: updatedArticle.downvotes,
-            user_vote: updatedArticle.user_vote
+            upvotes: updatedVote.upvotes,
+            downvotes: updatedVote.downvotes,
+            user_vote: updatedVote.user_current_vote
           });
         }
         
-        showToast(`Vote recorded!`, 'success');
+        showToast(updatedVote.message, 'success');
       } else {
         const errorData = await response.json();
         showToast(errorData.detail || 'Failed to vote', 'error');
@@ -390,6 +408,7 @@ const App: React.FC = () => {
     setCurrentPage('home');
     setArticles({});
     setFeaturedArticles([]);
+    setSelectedEntity(null);
     showToast('Logged out successfully', 'success');
   };
 
@@ -399,6 +418,32 @@ const App: React.FC = () => {
       month: 'short',
       day: 'numeric'
     });
+  };
+
+  const highlightTextPositions = (text: string, positions: number[][], className: string = 'bg-yellow-200 bg-opacity-50') => {
+    if (!positions || positions.length === 0) return text;
+
+    // Sort positions by start index to process them in order
+    const sortedPositions = [...positions].sort((a, b) => a[0] - b[0]);
+    
+    let result = '';
+    let lastIndex = 0;
+
+    sortedPositions.forEach(([start, end]) => {
+      // Add text before highlight
+      result += text.slice(lastIndex, start);
+      // Add highlighted text
+      result += `<span class="${className}">${text.slice(start, end)}</span>`;
+      lastIndex = end;
+    });
+
+    // Add remaining text
+    result += text.slice(lastIndex);
+    return result;
+  };
+
+  const handleEntityClick = (entity: Entity) => {
+    setSelectedEntity(selectedEntity === entity ? null : entity);
   };
 
   const renderCategoryIcon = (category: string | null) => {
@@ -414,7 +459,10 @@ const App: React.FC = () => {
         <div className="flex justify-between items-center h-16">
           <div 
             className="text-2xl md:text-3xl font-bold text-blue-600 cursor-pointer font-['Poppins']"
-            onClick={() => setCurrentPage('home')}
+            onClick={() => {
+              setCurrentPage('home');
+              setSelectedEntity(null);
+            }}
           >
             QuickInsight
           </div>
@@ -531,6 +579,7 @@ const App: React.FC = () => {
       }`}
       onClick={() => {
         setSelectedArticle(article);
+        setSelectedEntity(null);
         setCurrentPage('article');
       }}
     >
@@ -551,9 +600,9 @@ const App: React.FC = () => {
           </span>
         </div>
         <div className="absolute top-4 right-4 flex items-center space-x-2 bg-black bg-opacity-60 text-white px-3 py-2 rounded-full text-sm md:text-base font-medium">
-          <ThumbsUp className="w-5 h-5" />
+          <ThumbsUp className={`w-5 h-5 ${article.user_vote === 'up' ? 'text-green-400' : ''}`} />
           <span>{article.upvotes}</span>
-          <ThumbsDown className="w-5 h-5" />
+          <ThumbsDown className={`w-5 h-5 ${article.user_vote === 'down' ? 'text-red-400' : ''}`} />
           <span>{article.downvotes}</span>
         </div>
       </div>
@@ -610,9 +659,9 @@ const App: React.FC = () => {
                       {article.main_category || 'Uncategorized'}
                     </span>
                     <div className="flex items-center space-x-3 bg-black bg-opacity-60 text-white px-4 py-2 rounded-full text-base md:text-lg font-medium">
-                      <ThumbsUp className="w-5 h-5 md:w-6 md:h-6" />
+                      <ThumbsUp className={`w-5 h-5 md:w-6 md:h-6 ${article.user_vote === 'up' ? 'text-green-400' : ''}`} />
                       <span>{article.upvotes}</span>
-                      <ThumbsDown className="w-5 h-5 md:w-6 md:h-6" />
+                      <ThumbsDown className={`w-5 h-5 md:w-6 md:h-6 ${article.user_vote === 'down' ? 'text-red-400' : ''}`} />
                       <span>{article.downvotes}</span>
                     </div>
                   </div>
@@ -620,6 +669,7 @@ const App: React.FC = () => {
                     className="text-3xl md:text-5xl lg:text-6xl font-bold text-white mb-4 cursor-pointer hover:text-blue-200 transition-colors font-['Poppins'] leading-tight"
                     onClick={() => {
                       setSelectedArticle(article);
+                      setSelectedEntity(null);
                       setCurrentPage('article');
                     }}
                   >
@@ -699,6 +749,129 @@ const App: React.FC = () => {
               <NewsCard article={article} />
             </div>
           ))}
+        </div>
+      </div>
+    );
+  };
+
+  const EntitiesTable = ({ entities }: { entities: Entity[] }) => {
+    const validEntities = entities.filter(entity => 
+      entity.name.trim() !== '' || entity.context.trim() !== '' || entity.job.trim() !== ''
+    );
+    
+    if (validEntities.length === 0) {
+      return (
+        <div className="bg-white rounded-xl shadow-lg p-8">
+          <div className="bg-blue-600 text-white px-6 py-4 -mx-8 -mt-8 mb-6 rounded-t-xl">
+            <h3 className="text-xl font-bold font-['Poppins']">Entities</h3>
+          </div>
+          <div className="text-center py-8 text-gray-500">
+            <p className="text-lg">No entities found in this article</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+        <div className="bg-blue-600 text-white px-6 py-4">
+          <h3 className="text-xl font-bold font-['Poppins']">Entities ({validEntities.length})</h3>
+        </div>
+        <div className="max-h-96 overflow-y-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50 sticky top-0">
+              <tr>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Name</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Job</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Context</th>
+              </tr>
+            </thead>
+            <tbody>
+              {validEntities.map((entity, index) => (
+                <tr
+                  key={index}
+                  className={`cursor-pointer transition-colors hover:bg-blue-50 ${
+                    selectedEntity === entity ? 'bg-blue-100 border-l-4 border-blue-500' : ''
+                  }`}
+                  onClick={() => handleEntityClick(entity)}
+                >
+                  <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200 font-medium">
+                    {entity.name || '-'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600 border-b border-gray-200">
+                    {entity.job || '-'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600 border-b border-gray-200 max-w-xs">
+                    <div className="truncate" title={entity.context}>
+                      {entity.context || '-'}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {selectedEntity && (
+          <div className="px-4 py-3 bg-yellow-50 border-t border-yellow-200">
+            <p className="text-sm text-yellow-800">
+              <span className="font-semibold">Click highlighted text</span> to see entity details in the article.
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const EventsTable = ({ events }: { events: Event[] }) => {
+    const validEvents = events.filter(event => 
+      event.eventContext.trim() !== '' || event.eventDate.trim() !== '' || event.eventType.trim() !== ''
+    );
+    
+    if (validEvents.length === 0) {
+      return (
+        <div className="bg-white rounded-xl shadow-lg p-8">
+          <div className="bg-green-600 text-white px-6 py-4 -mx-8 -mt-8 mb-6 rounded-t-xl">
+            <h3 className="text-xl font-bold font-['Poppins']">Events</h3>
+          </div>
+          <div className="text-center py-8 text-gray-500">
+            <p className="text-lg">No events found in this article</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+        <div className="bg-green-600 text-white px-6 py-4">
+          <h3 className="text-xl font-bold font-['Poppins']">Events ({validEvents.length})</h3>
+        </div>
+        <div className="max-h-96 overflow-y-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50 sticky top-0">
+              <tr>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Type</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Date</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">Context</th>
+              </tr>
+            </thead>
+            <tbody>
+              {validEvents.map((event, index) => (
+                <tr key={index} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200 font-medium">
+                    {event.eventType || '-'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600 border-b border-gray-200">
+                    {event.eventDate || '-'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600 border-b border-gray-200 max-w-xs">
+                    <div className="truncate" title={event.eventContext}>
+                      {event.eventContext || '-'}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     );
@@ -960,89 +1133,155 @@ const App: React.FC = () => {
   }
 
   if (currentPage === 'article' && selectedArticle) {
+    // Prepare highlighted content
+    const getHighlightedContent = () => {
+      if (!selectedEntity) return selectedArticle.content;
+      
+      let content = selectedArticle.content;
+      const positions = [];
+      
+      // Add name positions if they exist and are valid
+      if (selectedEntity.name_position && selectedEntity.name_position.length === 2) {
+        const [start, end] = selectedEntity.name_position;
+        if (start < end && start >= 0 && end <= content.length) {
+          positions.push([start, end]);
+        }
+      }
+      
+      // Add context positions if they exist and are valid
+      if (selectedEntity.context_position && selectedEntity.context_position.length === 2) {
+        const [start, end] = selectedEntity.context_position;
+        if (start < end && start >= 0 && end <= content.length) {
+          positions.push([start, end]);
+        }
+      }
+      
+      return highlightTextPositions(content, positions, 'bg-yellow-300 bg-opacity-40 px-1 rounded shadow-sm');
+    };
+
     return (
       <div className="min-h-screen bg-gray-50 font-['Montserrat']">
         <Navigation />
-        <div className="w-full max-w-4xl lg:max-w-6xl mx-auto px-4 md:px-6 py-8 md:py-10">
-          <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-            <div className="p-6 md:p-10">
-              <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-gray-900 mb-6 md:mb-8 font-['Poppins'] leading-tight">
-                {selectedArticle.title}
-              </h1>
-              
-              <div className="flex flex-wrap items-center gap-4 md:gap-6 mb-6 md:mb-8 text-base md:text-lg text-gray-600">
-                <div className="flex items-center space-x-2">
-                  <Clock className="w-5 h-5 md:w-6 md:h-6" />
-                  <span className="font-medium">{formatDate(selectedArticle.published_at)}</span>
-                </div>
-                <span className="text-gray-300">•</span>
-                <span className="font-semibold text-blue-600 text-lg md:text-xl">{selectedArticle.publisher}</span>
-                <span className="text-gray-300">•</span>
-                <div className="flex items-center space-x-2">
-                  {renderCategoryIcon(selectedArticle.main_category)}
-                  <span className="font-medium">{selectedArticle.main_category || 'Uncategorized'}</span>
-                </div>
-                {selectedArticle.sub_category && (
-                  <>
+        <div className="max-w-full mx-auto px-4 md:px-6 py-8 md:py-10">
+          <div className="flex flex-col lg:flex-row gap-8">
+            {/* Main Article Content */}
+            <div className="lg:w-2/3">
+              <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                <div className="p-6 md:p-10">
+                  <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-gray-900 mb-6 md:mb-8 font-['Poppins'] leading-tight">
+                    {selectedArticle.title}
+                  </h1>
+                  
+                  <div className="flex flex-wrap items-center gap-4 md:gap-6 mb-6 md:mb-8 text-base md:text-lg text-gray-600">
+                    <div className="flex items-center space-x-2">
+                      <Clock className="w-5 h-5 md:w-6 md:h-6" />
+                      <span className="font-medium">{formatDate(selectedArticle.published_at)}</span>
+                    </div>
                     <span className="text-gray-300">•</span>
-                    <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm md:text-base font-medium">
-                      {selectedArticle.sub_category}
-                    </span>
-                  </>
-                )}
+                    <span className="font-semibold text-blue-600 text-lg md:text-xl">{selectedArticle.publisher}</span>
+                    <span className="text-gray-300">•</span>
+                    <div className="flex items-center space-x-2">
+                      {renderCategoryIcon(selectedArticle.main_category)}
+                      <span className="font-medium">{selectedArticle.main_category || 'Uncategorized'}</span>
+                    </div>
+                    {selectedArticle.sub_category && (
+                      <>
+                        <span className="text-gray-300">•</span>
+                        <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm md:text-base font-medium">
+                          {selectedArticle.sub_category}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                
+                <img
+                  src={selectedArticle.image || '/api/placeholder/800/400'}
+                  alt={selectedArticle.title}
+                  className="w-full h-64 md:h-96 object-cover"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.src = 'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=800&h=400&fit=crop';
+                  }}
+                />
+                
+                <div className="p-6 md:p-10">
+                  {selectedEntity && (
+                    <div className="mb-6 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r-lg">
+                      <p className="text-yellow-800 font-medium">
+                        <span className="font-bold">Highlighting:</span> {selectedEntity.name || 'Entity'} 
+                        {selectedEntity.job && ` (${selectedEntity.job})`}
+                      </p>
+                      <button 
+                        onClick={() => setSelectedEntity(null)}
+                        className="mt-2 text-yellow-600 hover:text-yellow-800 text-sm underline"
+                      >
+                        Clear highlighting
+                      </button>
+                    </div>
+                  )}
+                  
+                  <div className="prose prose-lg md:prose-xl max-w-none">
+                    {selectedEntity ? (
+                      <div 
+                        className="text-gray-800 leading-relaxed text-lg md:text-xl"
+                        dangerouslySetInnerHTML={{ 
+                          __html: getHighlightedContent().split('\n').map(p => `<p class="mb-6">${p}</p>`).join('') 
+                        }}
+                      />
+                    ) : (
+                      selectedArticle.content.split('\n').map((paragraph, index) => (
+                        <p key={index} className="mb-6 text-gray-800 leading-relaxed text-lg md:text-xl">
+                          {paragraph}
+                        </p>
+                      ))
+                    )}
+                  </div>
+                  
+                  <div className="mt-8 md:mt-12 pt-6 md:pt-8 border-t-2 border-gray-100 flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center space-x-4 md:space-x-6">
+                      <button
+                        onClick={() => handleVote(selectedArticle.id, 'up')}
+                        className={`flex items-center space-x-3 px-6 py-3 rounded-xl transition-colors font-semibold text-lg ${
+                          selectedArticle.user_vote === 'up'
+                            ? 'bg-green-500 text-white'
+                            : 'bg-green-100 text-green-700 hover:bg-green-200'
+                        }`}
+                      >
+                        <ThumbsUp className="w-6 h-6 md:w-7 md:h-7" />
+                        <span>{selectedArticle.upvotes}</span>
+                      </button>
+                      <button
+                        onClick={() => handleVote(selectedArticle.id, 'down')}
+                        className={`flex items-center space-x-3 px-6 py-3 rounded-xl transition-colors font-semibold text-lg ${
+                          selectedArticle.user_vote === 'down'
+                            ? 'bg-red-500 text-white'
+                            : 'bg-red-100 text-red-700 hover:bg-red-200'
+                        }`}
+                      >
+                        <ThumbsDown className="w-6 h-6 md:w-7 md:h-7" />
+                        <span>{selectedArticle.downvotes}</span>
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedEntity(null);
+                        setCurrentPage('home');
+                      }}
+                      className="bg-blue-600 text-white px-6 md:px-8 py-3 rounded-xl hover:bg-blue-700 transition-colors text-lg font-semibold w-full md:w-auto"
+                    >
+                      Back to Home
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-            
-            <img
-              src={selectedArticle.image || '/api/placeholder/800/400'}
-              alt={selectedArticle.title}
-              className="w-full h-64 md:h-96 object-cover"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.src = 'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=800&h=400&fit=crop';
-              }}
-            />
-            
-            <div className="p-6 md:p-10">
-              <div className="prose prose-lg md:prose-xl max-w-none">
-                {selectedArticle.content.split('\n').map((paragraph, index) => (
-                  <p key={index} className="mb-6 text-gray-800 leading-relaxed text-lg md:text-xl">
-                    {paragraph}
-                  </p>
-                ))}
-              </div>
-              
-              <div className="mt-8 md:mt-12 pt-6 md:pt-8 border-t-2 border-gray-100 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="flex items-center space-x-4 md:space-x-6">
-                  <button
-                    onClick={() => handleVote(selectedArticle.id, 'up')}
-                    className={`flex items-center space-x-3 px-6 py-3 rounded-xl transition-colors font-semibold text-lg ${
-                      selectedArticle.user_vote === 'up'
-                        ? 'bg-green-500 text-white'
-                        : 'bg-green-100 text-green-700 hover:bg-green-200'
-                    }`}
-                  >
-                    <ThumbsUp className="w-6 h-6 md:w-7 md:h-7" />
-                    <span>{selectedArticle.upvotes}</span>
-                  </button>
-                  <button
-                    onClick={() => handleVote(selectedArticle.id, 'down')}
-                    className={`flex items-center space-x-3 px-6 py-3 rounded-xl transition-colors font-semibold text-lg ${
-                      selectedArticle.user_vote === 'down'
-                        ? 'bg-red-500 text-white'
-                        : 'bg-red-100 text-red-700 hover:bg-red-200'
-                    }`}
-                  >
-                    <ThumbsDown className="w-6 h-6 md:w-7 md:h-7" />
-                    <span>{selectedArticle.downvotes}</span>
-                  </button>
-                </div>
-                <button
-                  onClick={() => setCurrentPage('home')}
-                  className="bg-blue-600 text-white px-6 md:px-8 py-3 rounded-xl hover:bg-blue-700 transition-colors text-lg font-semibold w-full md:w-auto"
-                >
-                  Back to Home
-                </button>
+
+            {/* Side Panel for Entities and Events */}
+            <div className="lg:w-1/3">
+              <div className="sticky top-24 space-y-6">
+                <EntitiesTable entities={selectedArticle.entities} />
+                <EventsTable events={selectedArticle.events} />
               </div>
             </div>
           </div>

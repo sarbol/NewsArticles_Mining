@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 import models
 import auth
 from fastapi import HTTPException
+import json
 
 def get_user_by_email(db: Session, email: str):
     return db.query(models.User).filter(models.User.email == email).first()
@@ -20,7 +21,12 @@ def create_user(db: Session, user_data):
     return user
 
 def create_article(db: Session, publisher_id: int, image_id: int, article_data):
-    article = models.Article(publisher_id=publisher_id, image_id = image_id, **article_data.__dict__)
+    article = models.Article(publisher_id=publisher_id, image_id = image_id,
+                             title = article_data.title, content = article_data.content,
+                             main_category = article_data.main_category,
+                             sub_category = article_data.sub_category,
+                             entities = [e.__dict__ for e in article_data.entities],
+                             events = [e.__dict__ for e in article_data.events])
     db.add(article)
     db.commit()
     db.refresh(article)
@@ -39,6 +45,7 @@ def get_articles_by_category(db: Session, main_category: str, limit: int, offset
     articles = query.order_by(models.Article.published_at.desc()).offset(offset).limit(limit).all()
     retrieved_articles = []
     for article in articles:
+        voted_users = [{"user_id": vote.user_id, "vote_type": vote.vote_type} for vote in article.votes]
         data = {
             "id": article.id,
             "publisher": article.publisher.user.name,
@@ -49,11 +56,13 @@ def get_articles_by_category(db: Session, main_category: str, limit: int, offset
             "sub_category": article.sub_category,
             "published_at": article.published_at,
             "upvotes": article.upvotes,
-            "downvotes": article.downvotes
-
+            "downvotes": article.downvotes,
+            "voted_users": voted_users,
+            "entities": article.entities,
+            "events": article.events
         }
         retrieved_articles.append(data)
-    return {"count": total, "articles": retrieved_articles}
+    return {"total": total, "articles": retrieved_articles}
 
 
 def make_vote(db: Session, user_id: int, vote_data):
@@ -70,6 +79,7 @@ def make_vote(db: Session, user_id: int, vote_data):
         if existing_vote.vote_type == vote_data.vote_type:
             # User clicked the same vote again → neutral position
             db.delete(existing_vote)
+            user_vote = "neutral"
             if vote_data.vote_type == 'up':
                 article.upvotes -= 1
             else:
@@ -79,9 +89,11 @@ def make_vote(db: Session, user_id: int, vote_data):
             if vote_data.vote_type == 'up':
                 article.upvotes += 1
                 article.downvotes -= 1
+                user_vote = "up"
             else:
                 article.downvotes += 1
                 article.upvotes -= 1
+                user_vote = "down"
             existing_vote.vote_type = vote_data.vote_type
     else:
         # First time vote
@@ -89,8 +101,10 @@ def make_vote(db: Session, user_id: int, vote_data):
         db.add(new_vote)
         if vote_data.vote_type == 'up':
             article.upvotes += 1
+            user_vote = "up"
         else:
             article.downvotes += 1
+            user_vote = "down"
 
     db.commit()
     db.refresh(article)
@@ -98,5 +112,6 @@ def make_vote(db: Session, user_id: int, vote_data):
         "article_id": article.id,
         "upvotes": article.upvotes,
         "downvotes": article.downvotes,
+        "user_current_vote": user_vote,
         "message": "Vote updated successfully"
     }

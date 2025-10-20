@@ -10,16 +10,36 @@ class Article:
 
 
 @dataclass
-class ArticleCreate:
-    content: str
-    title: Optional[str] = None
+class eventObject:
+    eventContext: Optional[str] = None
+    eventDate: Optional[str] = None
+    eventType: Optional[str] = None
+
+
+@dataclass
+class entityObject:
+    name: str
+    job: str
+    context: str
+    explicit: bool
+    name_position: List[int]
+    context_position: List[int]
+
+@dataclass
+class Category:
+    entities: List[entityObject]
+    events: List[eventObject]
     main_category: Optional[str] = None
     sub_category: Optional[str] = None
 
 @dataclass
-class Category:
-    main: Optional[str] = None
-    sub: Optional[str] = None
+class ArticleCreate:
+    content: str
+    entities: List[entityObject]
+    events: List[eventObject]
+    title: Optional[str] = None
+    main_category: Optional[str] = None
+    sub_category: Optional[str] = None
 
 @dataclass
 class UserCreate:
@@ -43,6 +63,11 @@ class VoteCreate:
     article_id: int
     vote_type: str  # 'up' or 'down'
 
+@dataclass
+class userVote:
+    user_id: int
+    vote_type: str
+
 
 @dataclass
 class ArticleResponse:
@@ -54,11 +79,14 @@ class ArticleResponse:
     published_at: datetime
     upvotes: int
     downvotes: int
+    voted_users: List[userVote]
+    entities: List[entityObject]
+    events: List[eventObject]
     main_category: Optional[str] = None
     sub_category: Optional[str] = None
 
 
 @dataclass
 class PaginatedArticles:
-    count: int
+    total: int
     articles: list[ArticleResponse]
