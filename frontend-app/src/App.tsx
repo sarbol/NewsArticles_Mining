@@ -70,7 +70,7 @@ interface VoteResponse {
   message: string;
 }
 
-const API_BASE_URL = '/api';
+const API_BASE_URL = 'http://localhost:8000/api';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
