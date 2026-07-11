@@ -8,6 +8,8 @@ load_dotenv()
 
 # SECRET_KEY & ALGORITHM
 SECRET_KEY = os.getenv("AUTH_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("AUTH_SECRET_KEY environment variable is required")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
